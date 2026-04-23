@@ -1,0 +1,144 @@
+/**
+ * Consensus extraction — stabilizes LLM fact extraction by running
+ * extractFacts() multiple times and keeping only facts that appear
+ * consistently across runs.
+ *
+ * For each run, facts are compared by semantic similarity. A fact is
+ * "stable" if it appears (with similarity >= threshold) in at least
+ * ceil(N/2) of N runs. Unstable facts are discarded.
+ *
+ * This reduces variance from LLM non-determinism at the cost of
+ * N× extraction API calls.
+ */
+
+import { extractFacts, type ExtractedFact } from './extraction.js';
+import { cachedExtractFacts } from './extraction-cache.js';
+import { chunkedExtractFacts } from './chunked-extraction.js';
+import { cosineSimilarity, embedText } from './embedding.js';
+import { classifyNetwork } from './memory-network.js';
+
+const SIMILARITY_THRESHOLD = 0.90;
+
+/**
+ * Config subset consumed by consensusExtractFacts. Kept narrow so callers
+ * only need to thread through the fields the function actually reads —
+ * a `Pick<IngestRuntimeConfig, ...>` of the deps.config bundle.
+ */
+export interface ConsensusExtractionConfig {
+  consensusExtractionEnabled: boolean;
+  consensusExtractionRuns: number;
+  chunkedExtractionEnabled: boolean;
+}
+
+interface FactWithEmbedding {
+  fact: ExtractedFact;
+  embedding: number[];
+}
+
+/**
+ * Run extraction N times and return facts based on mode:
+ * - "consensus" (default): Keep only facts that appear in majority of runs.
+ * - "union": Keep all unique facts found across all runs (improves recall).
+ * Falls back to single extraction when consensus is disabled.
+ *
+ * Config is passed explicitly — consumers thread their `deps.config`
+ * through. This module no longer reads the module-level config singleton.
+ */
+export async function consensusExtractFacts(
+  conversationText: string,
+  config: ConsensusExtractionConfig,
+): Promise<ExtractedFact[]> {
+  if (!config.consensusExtractionEnabled) {
+    return config.chunkedExtractionEnabled
+      ? chunkedExtractFacts(conversationText)
+      : cachedExtractFacts(conversationText);
+  }
+
+  const allRunFacts = await runMultipleExtractions(conversationText, config.consensusExtractionRuns);
+  const mode = (process.env.CONSENSUS_MODE || 'consensus').toLowerCase();
+
+  if (mode === 'union') {
+    const unique = await deduplicateFacts(allRunFacts.flat());
+    return applyNetworkClassification(unique);
+  }
+
+  const stableFacts = await filterByMajorityVote(allRunFacts);
+  return applyNetworkClassification(stableFacts);
+}
+
+/** Run extractFacts() N times to get independent LLM samples. */
+async function runMultipleExtractions(
+  conversationText: string,
+  runs: number,
+): Promise<ExtractedFact[][]> {
+  const allRunFacts: ExtractedFact[][] = [];
+  for (let i = 0; i < runs; i++) {
+    allRunFacts.push(await extractFacts(conversationText));
+  }
+  return allRunFacts;
+}
+
+/** Keep only facts from run[0] that appear in a majority of all runs. */
+async function filterByMajorityVote(
+  allRunFacts: ExtractedFact[][],
+): Promise<ExtractedFact[]> {
+  const referenceFacts = allRunFacts[0];
+  if (referenceFacts.length === 0) return [];
+
+  const majority = Math.ceil(allRunFacts.length / 2);
+  const refWithEmbeddings = await embedFacts(referenceFacts);
+  const otherRunEmbeddings = await Promise.all(
+    allRunFacts.slice(1).map((facts) => embedFacts(facts)),
+  );
+
+  return refWithEmbeddings
+    .filter((ref) => countMatches(ref, otherRunEmbeddings) + 1 >= majority)
+    .map((ref) => ref.fact);
+}
+
+/** Embed all facts in a batch. */
+async function embedFacts(facts: ExtractedFact[]): Promise<FactWithEmbedding[]> {
+  return Promise.all(
+    facts.map(async (fact) => ({ fact, embedding: await embedText(fact.fact) })),
+  );
+}
+
+/** Count how many other runs contain a similar fact. */
+function countMatches(
+  ref: FactWithEmbedding,
+  otherRuns: FactWithEmbedding[][],
+): number {
+  let count = 0;
+  for (const run of otherRuns) {
+    const hasMatch = run.some(
+      (other) => cosineSimilarity(ref.embedding, other.embedding) >= SIMILARITY_THRESHOLD,
+    );
+    if (hasMatch) count++;
+  }
+  return count;
+}
+
+/** Deduplicate facts using embedding similarity. */
+async function deduplicateFacts(facts: ExtractedFact[]): Promise<ExtractedFact[]> {
+  if (facts.length <= 1) return facts;
+  const withEmb = await Promise.all(facts.map(async (f) => ({ fact: f, embedding: await embedText(f.fact) })));
+  const kept: boolean[] = new Array(facts.length).fill(true);
+  for (let i = 0; i < withEmb.length; i++) {
+    if (!kept[i]) continue;
+    for (let j = i + 1; j < withEmb.length; j++) {
+      if (!kept[j]) continue;
+      if (cosineSimilarity(withEmb[i].embedding, withEmb[j].embedding) >= SIMILARITY_THRESHOLD) {
+        kept[j] = false;
+      }
+    }
+  }
+  return withEmb.filter((_, i) => kept[i]).map((e) => e.fact);
+}
+
+/** Classify each fact into its memory network (world/experience/opinion). */
+function applyNetworkClassification(facts: ExtractedFact[]): ExtractedFact[] {
+  return facts.map((fact) => {
+    const { network, opinionConfidence } = classifyNetwork(fact);
+    return { ...fact, network, opinionConfidence } as ExtractedFact;
+  });
+}

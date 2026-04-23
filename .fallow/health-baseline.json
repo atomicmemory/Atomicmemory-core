@@ -1,0 +1,26 @@
+{
+  "findings": [
+    "src/db/repository-write.ts:buildBaseParams:140",
+    "src/db/repository-claims.ts:createClaimVersionWithClient:256",
+    "src/services/llm.ts:chat:176",
+    "src/services/memory-audn.ts:tryOpinionIntercept:132",
+    "src/services/search-pipeline.ts:applyExpansionAndReranking:667",
+    "src/services/extraction.ts:repairTruncatedJson:38",
+    "src/services/llm.ts:cleaned:78",
+    "src/services/extraction-enrichment.ts:inferCrossEntityRelations:205",
+    "src/services/deferred-audn.ts:applyDeferredDecision:196",
+    "src/services/llm.ts:recordOpenAICost:147",
+    "src/services/llm.ts:chat:233",
+    "src/services/quick-extraction.ts:extractFactBearingTurns:82",
+    "src/db/repository-claims.ts:createClaimWithClient:58",
+    "src/services/embedding.ts:requestAndTrack:99",
+    "src/services/supplemental-extraction.ts:shouldIncludeSupplementalFact:41",
+    "src/services/__tests__/poisoning-dataset.ts:generateLegitimateVariations:286",
+    "src/services/atomicmem-uri.ts:resolve:33"
+  ],
+  "production_coverage_findings": [],
+  "target_keys": [
+    "src/services/conflict-policy.ts:high impact",
+    "src/services/composite-dedup.ts:high impact"
+  ]
+}
