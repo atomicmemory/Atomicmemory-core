@@ -374,7 +374,7 @@ export function updateRuntimeConfig(updates: RuntimeConfigUpdates): string[] {
  * This is a documentation type — it does not constrain threading. The runtime
  * still carries a single `RuntimeConfig` object; this array tags the public
  * subset so docs, tests, and future config-split work have a single source of
- * truth. See also: `docs/consuming-core.md`.
+ * truth. See also: https://docs.atomicmemory.ai/platform/consuming-core.
  */
 export const SUPPORTED_RUNTIME_CONFIG_FIELDS = [
   // Infrastructure
@@ -395,7 +395,8 @@ export const SUPPORTED_RUNTIME_CONFIG_FIELDS = [
   'consensusValidationEnabled', 'namespaceClassificationEnabled',
   // Cost / cache ops
   'extractionCacheDir', 'costLogDir', 'costRunId', 'costLoggingEnabled',
-  // Dev/test-only mutation gate for PUT /v1/memories/config (see docs/consuming-core.md)
+  // Dev/test-only mutation gate for PUT /v1/memories/config
+  // (see https://docs.atomicmemory.ai/platform/consuming-core)
   'runtimeConfigMutationEnabled',
 ] as const;
 

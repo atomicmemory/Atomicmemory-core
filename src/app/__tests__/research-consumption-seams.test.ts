@@ -1,9 +1,9 @@
 /**
  * Phase 6 research-consumption contract test.
  *
- * Proves the two in-repo consumption seams documented in
- * `docs/consuming-core.md` both work against a shared runtime and agree
- * on stored state:
+ * Proves the two in-repo consumption seams documented at
+ * https://docs.atomicmemory.ai/platform/consuming-core both work against a
+ * shared runtime and agree on stored state:
  *
  *   - in-process:  `createCoreRuntime({ pool }).services.memory.*`
  *   - HTTP:         `bindEphemeral(createApp(runtime))` + `fetch`

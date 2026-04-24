@@ -151,8 +151,6 @@ src/
 
 Storage: Postgres + pgvector. Retrieval: hybrid (vector + BM25/FTS). Mutation: contradiction-safe AUDN with claim versioning.
 
-See `docs/memory-research/architecture-overview.md` for detailed architecture documentation.
-
 ## Development
 
 ```bash

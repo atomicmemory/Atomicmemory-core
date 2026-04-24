@@ -14,7 +14,7 @@ import { config } from '../config.js';
 import type { SearchResult } from '../db/memory-repository.js';
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
-const DEFAULT_TRACE_DIR = resolve(__dirname, '../../docs/memory-research/evaluation/traces');
+const DEFAULT_TRACE_DIR = resolve(__dirname, '../../.traces');
 
 /** A snapshot of a single memory at a pipeline stage. */
 interface TracedMemory {

@@ -27,8 +27,9 @@ competitive analysis, and design explorations belong in a separate research
 repo. If it changes shipped backend behavior, it belongs here. If it only
 changes benchmark outputs or scoring methodology, it belongs in research.
 
-See `docs/consuming-core.md` for the stable seams (HTTP, in-process runtime
-container, docker/E2E compose) that research and SDK consumers should use.
+See https://docs.atomicmemory.ai/platform/consuming-core for the stable seams
+(HTTP, in-process runtime container, docker/E2E compose) that research and SDK
+consumers should use.
 
 ## Development Guidelines
 
