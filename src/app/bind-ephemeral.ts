@@ -7,7 +7,7 @@
  * harness that wants to exercise the HTTP contract against a live core
  * server without hard-coding port allocation.
  *
- * Phase 6 of the rearchitecture — see docs/consuming-core.md.
+ * See https://docs.atomicmemory.ai/platform/consuming-core.
  */
 
 import type express from 'express';

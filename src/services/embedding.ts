@@ -163,7 +163,6 @@ class OllamaEmbedding implements EmbeddingProvider {
  * ONNX Runtime's C++ mutex corrupts under concurrent async calls, causing
  * `mutex lock failed: Invalid argument` crashes in long-running processes.
  * All inference is serialized through a promise queue to prevent this.
- * See docs/memory-research/evaluation/onnx-stability-issue.md.
  */
 class TransformersEmbedding implements EmbeddingProvider {
   private model: string;
