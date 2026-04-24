@@ -40,6 +40,9 @@ docs/memory-research/evaluation/
 # Test results
 test-results/
 coverage/
+
+# Internal tech-debt notes — never commit.
+tech-debt.md
 .nyc_output/
 
 # Code analysis tools
