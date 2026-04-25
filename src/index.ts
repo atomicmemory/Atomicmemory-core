@@ -9,9 +9,12 @@ export { ClaimRepository } from './db/claim-repository.js';
 export { pool } from './db/pool.js';
 export {
   config,
+  applyRuntimeConfigUpdates,
   updateRuntimeConfig,
   SUPPORTED_RUNTIME_CONFIG_FIELDS,
   INTERNAL_POLICY_CONFIG_FIELDS,
+  type RuntimeConfig,
+  type RuntimeConfigUpdates,
   type EmbeddingProviderName,
   type LLMProviderName,
   type VectorBackendName,

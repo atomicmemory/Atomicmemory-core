@@ -135,6 +135,13 @@ describe('deployment configuration', () => {
     it('documents EMBEDDING_DIMENSIONS', () => {
       expect(readEnvExample()).toContain('EMBEDDING_DIMENSIONS');
     });
+
+    it('documents Voyage embedding lane env vars', () => {
+      const envExample = readEnvExample();
+      expect(envExample).toContain('VOYAGE_API_KEY');
+      expect(envExample).toContain('VOYAGE_DOCUMENT_MODEL');
+      expect(envExample).toContain('VOYAGE_QUERY_MODEL');
+    });
   });
 
   describe('Dockerfile', () => {

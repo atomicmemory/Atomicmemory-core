@@ -72,6 +72,7 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 interface RuntimeConfigRouteAdapter {
+  base(): RuntimeConfig;
   current(): RuntimeConfigRouteSnapshot;
   update(updates: RuntimeConfigRouteUpdates): string[];
 }
@@ -101,9 +102,20 @@ interface MemoryByIdRouteQuery {
   agentId: string | undefined;
 }
 
-const STARTUP_ONLY_CONFIG_FIELDS = ['embedding_provider', 'embedding_model', 'llm_provider', 'llm_model'] as const;
+const STARTUP_ONLY_CONFIG_FIELDS = [
+  'embedding_provider',
+  'embedding_model',
+  'voyage_api_key',
+  'voyage_document_model',
+  'voyage_query_model',
+  'llm_provider',
+  'llm_model',
+] as const;
 
 const defaultRuntimeConfigRouteAdapter: RuntimeConfigRouteAdapter = {
+  base() {
+    return config;
+  },
   current() {
     return readRuntimeConfigRouteSnapshot();
   },
@@ -121,8 +133,8 @@ export function createMemoryRouter(
   // Dev/test-mode response validator: no-op in production, throws loudly
   // if any 2xx body violates the schema declared in responses.ts.
   router.use(validateResponse(MEMORY_RESPONSE_SCHEMAS));
-  registerIngestRoute(router, service);
-  registerQuickIngestRoute(router, service);
+  registerIngestRoute(router, service, configRouteAdapter);
+  registerQuickIngestRoute(router, service, configRouteAdapter);
   registerSearchRoute(router, service, configRouteAdapter);
   registerFastSearchRoute(router, service, configRouteAdapter);
   registerExpandRoute(router, service);
@@ -155,20 +167,28 @@ function registerCors(router: Router): void {
   });
 }
 
-function registerIngestRoute(router: Router, service: MemoryService): void {
+function registerIngestRoute(
+  router: Router,
+  service: MemoryService,
+  configRouteAdapter: RuntimeConfigRouteAdapter,
+): void {
   router.post('/ingest', validateBody(IngestBodySchema), async (req: Request, res: Response) => {
     try {
-      await handleIngestRequest(service, req, res, 'full');
+      await handleIngestRequest(service, req, res, configRouteAdapter, 'full');
     } catch (err) {
       handleRouteError(res, 'POST /v1/memories/ingest', err);
     }
   });
 }
 
-function registerQuickIngestRoute(router: Router, service: MemoryService): void {
+function registerQuickIngestRoute(
+  router: Router,
+  service: MemoryService,
+  configRouteAdapter: RuntimeConfigRouteAdapter,
+): void {
   router.post('/ingest/quick', validateBody(IngestBodySchema), async (req: Request, res: Response) => {
     try {
-      await handleIngestRequest(service, req, res, 'quick');
+      await handleIngestRequest(service, req, res, configRouteAdapter, 'quick');
     } catch (err) {
       handleRouteError(res, 'POST /v1/memories/ingest/quick', err);
     }
@@ -179,9 +199,10 @@ async function handleIngestRequest(
   service: MemoryService,
   req: Request,
   res: Response,
+  configRouteAdapter: RuntimeConfigRouteAdapter,
   mode: 'full' | 'quick',
 ): Promise<void> {
-  const { body, effectiveConfig } = readIngestRequest(req, res);
+  const { body, effectiveConfig } = readIngestRequest(req, res, configRouteAdapter);
   const result = await runIngest(service, body, effectiveConfig, mode);
   res.json(formatIngestResponse(result));
 }
@@ -219,11 +240,15 @@ function resolveSearchPreamble(body: SearchBody, maxSearchResults: number) {
   return { scope, requestLimit };
 }
 
-function readIngestRequest(req: Request, res: Response): IngestRequestContext {
+function readIngestRequest(
+  req: Request,
+  res: Response,
+  configRouteAdapter: RuntimeConfigRouteAdapter,
+): IngestRequestContext {
   const body = req.body as IngestBody;
   return {
     body,
-    effectiveConfig: applyRequestConfigOverride(res, body.configOverride),
+    effectiveConfig: applyRequestConfigOverride(res, configRouteAdapter.base(), body.configOverride),
   };
 }
 
@@ -233,7 +258,7 @@ function readSearchRequest(
   configRouteAdapter: RuntimeConfigRouteAdapter,
 ): SearchRequestContext {
   const body = req.body as SearchBody;
-  const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
+  const effectiveConfig = applyRequestConfigOverride(res, configRouteAdapter.base(), body.configOverride);
   const maxSearchResults = effectiveConfig?.maxSearchResults ?? configRouteAdapter.current().maxSearchResults;
   const { scope, requestLimit } = resolveSearchPreamble(body, maxSearchResults);
   return { body, effectiveConfig, scope, requestLimit };
@@ -368,7 +393,7 @@ function registerConfigRoute(router: Router, configRouteAdapter: RuntimeConfigRo
       if (rejected.length > 0) {
         res.status(400).json({
           error: 'Provider/model selection is startup-only',
-          detail: `Fields ${rejected.join(', ')} cannot be mutated at runtime — the embedding/LLM provider caches are fixed at first use. Set the equivalent env vars (EMBEDDING_PROVIDER, EMBEDDING_MODEL, LLM_PROVIDER, LLM_MODEL) and restart the process.`,
+          detail: `Fields ${rejected.join(', ')} cannot be mutated at runtime — the embedding/LLM provider caches are fixed at first use. Set the equivalent env vars (EMBEDDING_PROVIDER, EMBEDDING_MODEL, VOYAGE_API_KEY, VOYAGE_DOCUMENT_MODEL, VOYAGE_QUERY_MODEL, LLM_PROVIDER, LLM_MODEL) and restart the process.`,
           rejected,
         });
         return;
@@ -669,15 +694,16 @@ function toMemoryScope(
  */
 function applyRequestConfigOverride(
   res: Response,
+  baseConfig: RuntimeConfig,
   override: Partial<RuntimeConfig> | undefined,
 ): MemoryServiceDeps['config'] | undefined {
   if (!override || Object.keys(override).length === 0) return undefined;
-  const effective = applyConfigOverride(config, override);
+  const effective = applyConfigOverride(baseConfig, override);
   res.setHeader('X-Atomicmem-Config-Override-Applied', 'true');
   res.setHeader('X-Atomicmem-Effective-Config-Hash', hashEffectiveConfig(effective));
   res.setHeader('X-Atomicmem-Config-Override-Keys', summarizeOverrideKeys(override));
 
-  const knownKeys = new Set(Object.keys(config));
+  const knownKeys = new Set(Object.keys(baseConfig));
   const unknownKeys = Object.keys(override)
     .filter((k) => !knownKeys.has(k))
     .sort();
@@ -722,6 +748,8 @@ function formatHealthConfig(runtimeConfig: RuntimeConfigRouteSnapshot) {
     retrieval_profile: runtimeConfig.retrievalProfile,
     embedding_provider: runtimeConfig.embeddingProvider,
     embedding_model: runtimeConfig.embeddingModel,
+    voyage_document_model: runtimeConfig.voyageDocumentModel,
+    voyage_query_model: runtimeConfig.voyageQueryModel,
     llm_provider: runtimeConfig.llmProvider,
     llm_model: runtimeConfig.llmModel,
     clarification_conflict_threshold: runtimeConfig.clarificationConflictThreshold,

@@ -27,17 +27,15 @@ import {
   initEmbedding,
 } from '../embedding.js';
 
-// The module-local config in embedding.ts requires an explicit init call
-// (Phase 7 Step 3d). Tests that go through `createCoreRuntime` get this
-// from the composition root; tests like this one that import embedText
-// directly must init themselves. A narrow config is used so the mocked
-// OpenAI constructor is what gets invoked.
-beforeAll(() => {
+function initOpenAiEmbedding(): void {
   initEmbedding({
     embeddingProvider: 'openai',
     embeddingModel: 'text-embedding-3-small',
     embeddingDimensions: 1024,
     embeddingApiUrl: undefined,
+    voyageApiKey: undefined,
+    voyageDocumentModel: 'voyage-4-large',
+    voyageQueryModel: 'voyage-4-lite',
     ollamaBaseUrl: 'http://localhost:11434',
     openaiApiKey: 'test-key',
     embeddingCacheEnabled: false,
@@ -46,6 +44,15 @@ beforeAll(() => {
     costRunId: 'test',
     costLogDir: '/tmp/test-cost',
   });
+}
+
+// The module-local config in embedding.ts requires an explicit init call
+// (Phase 7 Step 3d). Tests that go through `createCoreRuntime` get this
+// from the composition root; tests like this one that import embedText
+// directly must init themselves. A narrow config is used so the mocked
+// OpenAI constructor is what gets invoked.
+beforeAll(() => {
+  initOpenAiEmbedding();
 });
 
 function makeEmbedResponse(count: number) {
@@ -81,6 +88,18 @@ describe('embedding LRU cache', () => {
 
     expect(first).toEqual([1, 1]);
     expect(second).toEqual([9, 9]);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not collide query and document embeddings of the same text', async () => {
+    mockCreate.mockResolvedValueOnce({ data: [{ index: 0, embedding: [1, 1] }] });
+    mockCreate.mockResolvedValueOnce({ data: [{ index: 0, embedding: [9, 9] }] });
+
+    const document = await embedText('same text', 'document');
+    const query = await embedText('same text', 'query');
+
+    expect(document).toEqual([1, 1]);
+    expect(query).toEqual([9, 9]);
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
@@ -166,5 +185,45 @@ describe('embedTexts batch with cache', () => {
     const cached = await embedText('x');
     expect(cached).toEqual([1, 1]);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('Voyage embedding provider', () => {
+  beforeEach(() => {
+    clearEmbeddingCache();
+    vi.unstubAllGlobals();
+    initEmbedding({
+      embeddingProvider: 'voyage',
+      embeddingModel: 'unused-for-voyage',
+      embeddingDimensions: 1024,
+      embeddingApiUrl: undefined,
+      voyageApiKey: 'voyage-key',
+      voyageDocumentModel: 'voyage-4-large',
+      voyageQueryModel: 'voyage-4-lite',
+      ollamaBaseUrl: 'http://localhost:11434',
+      openaiApiKey: '',
+      embeddingCacheEnabled: false,
+      extractionCacheDir: '/tmp/test-extraction',
+      costLoggingEnabled: false,
+      costRunId: 'test',
+      costLogDir: '/tmp/test-cost',
+    });
+  });
+
+  it('uses task-specific Voyage models and input_type values', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ index: 0, embedding: [4, 4] }], usage: { total_tokens: 3 } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await embedText('same text', 'query');
+    await embedText('same text', 'document');
+
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(firstBody).toMatchObject({ model: 'voyage-4-lite', input_type: 'query' });
+    expect(secondBody).toMatchObject({ model: 'voyage-4-large', input_type: 'document' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

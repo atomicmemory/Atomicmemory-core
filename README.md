@@ -118,8 +118,31 @@ Set `EMBEDDING_PROVIDER` to choose your embedding backend:
 | `openai-compatible` | Any OpenAI-compatible API (recommended for self-hosters) |
 | `ollama` | Local Ollama instance |
 | `transformers` | Local WASM/ONNX inference via @huggingface/transformers |
+| `voyage` | Voyage AI embeddings with separate document/query models |
 
 For self-hosted deployments, `openai-compatible` is recommended as it works with any OpenAI-compatible embedding service.
+
+In-process benchmark harnesses can avoid editing env files by passing a
+composition-time config to the runtime:
+
+```ts
+import { config, createCoreRuntime } from '@atomicmemory/atomicmemory-core';
+
+const runtime = createCoreRuntime({
+  pool,
+  config: {
+    ...config,
+    embeddingProvider: 'voyage',
+    embeddingDimensions: 1024,
+    voyageApiKey,
+    voyageDocumentModel: 'voyage-4-large',
+    voyageQueryModel: 'voyage-4-lite',
+  },
+});
+```
+
+Provider/model fields are still startup-only for a given runtime. Use a new
+isolated runtime or process for each embedding configuration.
 
 See `.env.example` for the full list of configuration options.
 

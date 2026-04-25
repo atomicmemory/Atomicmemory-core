@@ -149,6 +149,8 @@ const HealthConfigResponseSchema = z.object({
   retrieval_profile: z.string(),
   embedding_provider: z.string(),
   embedding_model: z.string(),
+  voyage_document_model: z.string(),
+  voyage_query_model: z.string(),
   llm_provider: z.string(),
   llm_model: z.string(),
   clarification_conflict_threshold: z.number(),

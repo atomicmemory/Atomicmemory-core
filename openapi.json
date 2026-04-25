@@ -1203,12 +1203,20 @@
                         },
                         "retrieval_profile": {
                           "type": "string"
+                        },
+                        "voyage_document_model": {
+                          "type": "string"
+                        },
+                        "voyage_query_model": {
+                          "type": "string"
                         }
                       },
                       "required": [
                         "retrieval_profile",
                         "embedding_provider",
                         "embedding_model",
+                        "voyage_document_model",
+                        "voyage_query_model",
                         "llm_provider",
                         "llm_model",
                         "clarification_conflict_threshold",
@@ -1945,12 +1953,20 @@
                         },
                         "retrieval_profile": {
                           "type": "string"
+                        },
+                        "voyage_document_model": {
+                          "type": "string"
+                        },
+                        "voyage_query_model": {
+                          "type": "string"
                         }
                       },
                       "required": [
                         "retrieval_profile",
                         "embedding_provider",
                         "embedding_model",
+                        "voyage_document_model",
+                        "voyage_query_model",
                         "llm_provider",
                         "llm_model",
                         "clarification_conflict_threshold",

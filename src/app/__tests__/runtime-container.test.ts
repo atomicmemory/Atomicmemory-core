@@ -12,30 +12,14 @@ import pg from 'pg';
 import { createCoreRuntime } from '../runtime-container.js';
 import { checkEmbeddingDimensions } from '../startup-checks.js';
 import { createApp } from '../create-app.js';
-import { config } from '../../config.js';
+import { config, type RuntimeConfig } from '../../config.js';
 
 function stubPool(rows: Array<{ typmod: number }> = []): pg.Pool {
   return { query: vi.fn(async () => ({ rows })) } as unknown as pg.Pool;
 }
 
-/**
- * Temporarily mutate a config flag, run a function, and restore.
- * Used to exercise repo-construction branches without accepting a config
- * override on createCoreRuntime (which would be dishonest — most code
- * reads config from the module singleton directly).
- */
-function withConfigFlag<K extends 'entityGraphEnabled' | 'lessonsEnabled'>(
-  key: K,
-  value: typeof config[K],
-  run: () => void,
-): void {
-  const previous = config[key];
-  (config as unknown as Record<string, unknown>)[key] = value;
-  try {
-    run();
-  } finally {
-    (config as unknown as Record<string, unknown>)[key] = previous;
-  }
+function runtimeConfig(overrides: Partial<RuntimeConfig>): RuntimeConfig {
+  return { ...config, ...overrides };
 }
 
 describe('createCoreRuntime', () => {
@@ -64,46 +48,53 @@ describe('createCoreRuntime', () => {
 
   it('store entity/lesson track config flags', () => {
     const pool = stubPool();
-    withConfigFlag('entityGraphEnabled', false, () => {
-      expect(createCoreRuntime({ pool }).stores.entity).toBeNull();
-    });
-    withConfigFlag('entityGraphEnabled', true, () => {
-      expect(createCoreRuntime({ pool }).stores.entity).not.toBeNull();
-    });
-    withConfigFlag('lessonsEnabled', false, () => {
-      expect(createCoreRuntime({ pool }).stores.lesson).toBeNull();
-    });
-    withConfigFlag('lessonsEnabled', true, () => {
-      expect(createCoreRuntime({ pool }).stores.lesson).not.toBeNull();
-    });
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ entityGraphEnabled: false }) }).stores.entity).toBeNull();
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ entityGraphEnabled: true }) }).stores.entity).not.toBeNull();
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ lessonsEnabled: false }) }).stores.lesson).toBeNull();
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ lessonsEnabled: true }) }).stores.lesson).not.toBeNull();
   });
 
-  it('runtime.config references the module-level config singleton', () => {
-    // Phase 1A.5 truthfulness: the container does not accept a config
-    // override because routes/services still read the singleton.
+  it('uses the module-level config singleton by default', () => {
     const pool = stubPool();
     const runtime = createCoreRuntime({ pool });
     expect(runtime.config).toBe(config);
   });
 
+  it('accepts an explicit composition-time config for isolated harnesses', () => {
+    const pool = stubPool();
+    const cfg = runtimeConfig({
+      embeddingProvider: 'voyage',
+      embeddingModel: 'unused-for-voyage',
+      embeddingDimensions: 1024,
+      voyageApiKey: 'test-voyage-key',
+      voyageDocumentModel: 'voyage-4-large',
+      voyageQueryModel: 'voyage-4-lite',
+    });
+    const runtime = createCoreRuntime({ pool, config: cfg });
+    expect(runtime.config).toBe(cfg);
+    expect(runtime.configRouteAdapter.current().embeddingProvider).toBe('voyage');
+    expect(runtime.configRouteAdapter.current().voyageDocumentModel).toBe('voyage-4-large');
+  });
+
   it('entity repo tracks config.entityGraphEnabled', () => {
     const pool = stubPool();
-    withConfigFlag('entityGraphEnabled', false, () => {
-      expect(createCoreRuntime({ pool }).repos.entities).toBeNull();
-    });
-    withConfigFlag('entityGraphEnabled', true, () => {
-      expect(createCoreRuntime({ pool }).repos.entities).not.toBeNull();
-    });
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ entityGraphEnabled: false }) }).repos.entities).toBeNull();
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ entityGraphEnabled: true }) }).repos.entities).not.toBeNull();
   });
 
   it('lesson repo tracks config.lessonsEnabled', () => {
     const pool = stubPool();
-    withConfigFlag('lessonsEnabled', false, () => {
-      expect(createCoreRuntime({ pool }).repos.lessons).toBeNull();
-    });
-    withConfigFlag('lessonsEnabled', true, () => {
-      expect(createCoreRuntime({ pool }).repos.lessons).not.toBeNull();
-    });
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ lessonsEnabled: false }) }).repos.lessons).toBeNull();
+    expect(createCoreRuntime({ pool, config: runtimeConfig({ lessonsEnabled: true }) }).repos.lessons).not.toBeNull();
+  });
+
+  it('mutates the runtime-local config through the route adapter', () => {
+    const pool = stubPool();
+    const cfg = runtimeConfig({ maxSearchResults: 3 });
+    const runtime = createCoreRuntime({ pool, config: cfg });
+    expect(runtime.configRouteAdapter.update({ maxSearchResults: 9 })).toEqual(['maxSearchResults']);
+    expect(cfg.maxSearchResults).toBe(9);
+    expect(config.maxSearchResults).not.toBe(9);
   });
 });
 

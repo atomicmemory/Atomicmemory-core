@@ -11,11 +11,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createMemoryRouter } from '../routes/memories.js';
 import type { MemoryService } from '../services/memory-service.js';
 import { type BootedApp, bindEphemeral } from '../app/bind-ephemeral.js';
+import { config, type RuntimeConfig } from '../config.js';
 
 interface MutableRouteConfig {
   retrievalProfile: string;
   embeddingProvider: 'openai';
   embeddingModel: string;
+  voyageDocumentModel: string;
+  voyageQueryModel: string;
   llmProvider: 'openai';
   llmModel: string;
   clarificationConflictThreshold: number;
@@ -34,11 +37,17 @@ describe('memory route config seam', () => {
   let routeConfig: MutableRouteConfig;
   const search = vi.fn();
 
+  function routeBaseConfig(): RuntimeConfig {
+    return { ...config, ...routeConfig, retrievalProfile: config.retrievalProfile };
+  }
+
   beforeAll(async () => {
     routeConfig = {
       retrievalProfile: 'route-adapter-profile',
       embeddingProvider: 'openai',
       embeddingModel: 'adapter-embedding-model',
+      voyageDocumentModel: 'voyage-4-large',
+      voyageQueryModel: 'voyage-4-lite',
       llmProvider: 'openai',
       llmModel: 'adapter-llm-model',
       clarificationConflictThreshold: 0.91,
@@ -93,6 +102,7 @@ describe('memory route config seam', () => {
     } as unknown as MemoryService;
 
     const configRouteAdapter = {
+      base: routeBaseConfig,
       current: () => ({ ...routeConfig }),
       update: (updates: { maxSearchResults?: number }) => {
         if (updates.maxSearchResults !== undefined) {

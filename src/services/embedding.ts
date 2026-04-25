@@ -1,8 +1,8 @@
 /**
  * Embedding provider abstraction.
- * Supports OpenAI, Ollama, OpenAI-compatible APIs, and local WASM
- * (via @huggingface/transformers with ONNX Runtime).
- * Provider is selected via EMBEDDING_PROVIDER env var.
+ * Supports OpenAI, Ollama, OpenAI-compatible APIs, Voyage AI, and local
+ * WASM (via @huggingface/transformers with ONNX Runtime). Provider/model
+ * selection comes from the RuntimeConfig bound by createCoreRuntime().
  */
 
 import { createHash } from 'node:crypto';
@@ -14,11 +14,13 @@ import {
   estimateCostUsd,
   summarizeUsage,
   writeCostEvent,
+  type CostUsage,
   type WriteCostEventConfig,
 } from './cost-telemetry.js';
 import type {
   EmbeddingProviderName,
 } from '../config.js';
+import { VOYAGE_API_BASE, VoyageEmbedding } from './voyage-embedding.js';
 
 /**
  * Config subset consumed by the embedding module. After Phase 7 Step 3c,
@@ -34,6 +36,9 @@ export interface EmbeddingConfig extends WriteCostEventConfig {
   embeddingDimensions: number;
   embeddingApiUrl?: string;
   embeddingApiKey?: string;
+  voyageApiKey?: string;
+  voyageDocumentModel: string;
+  voyageQueryModel: string;
   openaiApiKey: string;
   ollamaBaseUrl: string;
   embeddingCacheEnabled: boolean;
@@ -64,11 +69,31 @@ function requireConfig(): EmbeddingConfig {
   return embeddingConfig;
 }
 
+function writeEmbeddingUsageEvent(
+  config: EmbeddingConfig,
+  model: string,
+  usage: CostUsage,
+  started: number,
+): void {
+  writeCostEvent({
+    stage: 'embedding',
+    provider: config.embeddingProvider,
+    model,
+    requestKind: 'embedding',
+    durationMs: performance.now() - started,
+    cacheHit: false,
+    inputTokens: usage.inputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
+    totalTokens: usage.totalTokens ?? null,
+    estimatedCostUsd: estimateCostUsd(config.embeddingProvider, model, usage),
+  }, config);
+}
+
 export type EmbeddingTask = 'query' | 'document';
 
 export interface EmbeddingProvider {
-  embed(text: string): Promise<number[]>;
-  embedBatch(texts: string[]): Promise<number[][]>;
+  embed(text: string, task: EmbeddingTask): Promise<number[]>;
+  embedBatch(texts: string[], task: EmbeddingTask): Promise<number[][]>;
 }
 
 /** OpenAI and any OpenAI-compatible embedding API. */
@@ -83,12 +108,12 @@ class OpenAICompatibleEmbedding implements EmbeddingProvider {
     this.dimensions = dimensions;
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embed(text: string, _task: EmbeddingTask): Promise<number[]> {
     const response = await this.requestAndTrack(text);
     return response.data[0].embedding;
   }
 
-  async embedBatch(texts: string[]): Promise<number[][]> {
+  async embedBatch(texts: string[], _task: EmbeddingTask): Promise<number[][]> {
     if (texts.length === 0) return [];
     const response = await this.requestAndTrack(texts);
     return response.data
@@ -96,17 +121,28 @@ class OpenAICompatibleEmbedding implements EmbeddingProvider {
       .map((d) => d.embedding);
   }
 
-  private async requestAndTrack(input: string | string[]) {
-    const config = requireConfig();
-    const request = () => this.client.embeddings.create({
+  private embeddingRequest(input: string | string[]) {
+    const request: { model: string; input: string | string[]; dimensions?: number } = {
       model: this.model,
       input,
-      ...(this.dimensions ? { dimensions: this.dimensions } : {}),
-    });
+    };
+    if (this.dimensions !== undefined) request.dimensions = this.dimensions;
+    return request;
+  }
+
+  private usageFromResponse(response: { usage?: { prompt_tokens?: number; total_tokens?: number } }): CostUsage {
+    const totalTokens = response.usage?.total_tokens ?? null;
+    const promptTokens = response.usage?.prompt_tokens ?? null;
+    const inputTokens = promptTokens === null ? totalTokens : promptTokens;
+    return summarizeUsage(inputTokens, null, totalTokens);
+  }
+
+  private async requestAndTrack(input: string | string[]) {
+    const config = requireConfig();
+    const request = () => this.client.embeddings.create(this.embeddingRequest(input));
     const started = performance.now();
     const response = await retryOnRateLimit(request);
-    const usage = summarizeUsage(response.usage?.prompt_tokens ?? response.usage?.total_tokens ?? null, null, response.usage?.total_tokens ?? null);
-    writeCostEvent({ stage: 'embedding', provider: config.embeddingProvider, model: this.model, requestKind: 'embedding', durationMs: performance.now() - started, cacheHit: false, inputTokens: usage.inputTokens ?? null, outputTokens: usage.outputTokens ?? null, totalTokens: usage.totalTokens ?? null, estimatedCostUsd: estimateCostUsd(config.embeddingProvider, this.model, usage) }, config);
+    writeEmbeddingUsageEvent(config, this.model, this.usageFromResponse(response), started);
     return response;
   }
 }
@@ -121,12 +157,12 @@ class OllamaEmbedding implements EmbeddingProvider {
     this.model = model;
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embed(text: string, _task: EmbeddingTask): Promise<number[]> {
     const data = await this.ollamaFetch(text, 'Ollama embed failed');
     return data.embeddings[0];
   }
 
-  async embedBatch(texts: string[]): Promise<number[][]> {
+  async embedBatch(texts: string[], _task: EmbeddingTask): Promise<number[][]> {
     if (texts.length === 0) return [];
     const data = await this.ollamaFetch(texts, 'Ollama embed batch failed');
     return data.embeddings;
@@ -148,7 +184,7 @@ class OllamaEmbedding implements EmbeddingProvider {
 
     const data = await response.json() as { embeddings: number[][]; prompt_eval_count?: number; eval_count?: number };
     const usage = summarizeUsage(data.prompt_eval_count ?? null, data.eval_count ?? null, null);
-    writeCostEvent({ stage: 'embedding', provider: config.embeddingProvider, model: this.model, requestKind: 'embedding', durationMs: performance.now() - started, cacheHit: false, inputTokens: usage.inputTokens ?? null, outputTokens: usage.outputTokens ?? null, totalTokens: usage.totalTokens ?? null, estimatedCostUsd: estimateCostUsd(config.embeddingProvider, this.model, usage) }, config);
+    writeEmbeddingUsageEvent(config, this.model, usage, started);
     return data;
   }
 }
@@ -193,14 +229,14 @@ class TransformersEmbedding implements EmbeddingProvider {
     });
   }
 
-  async embed(text: string): Promise<number[]> {
+  async embed(text: string, _task: EmbeddingTask): Promise<number[]> {
     return this.serialized(async (extractor) => {
       const output = await extractor(text, { pooling: 'mean', normalize: true });
       return Array.from(output.data as Float32Array);
     });
   }
 
-  async embedBatch(texts: string[]): Promise<number[][]> {
+  async embedBatch(texts: string[], _task: EmbeddingTask): Promise<number[][]> {
     if (texts.length === 0) return [];
     return this.serialized(async (extractor) => {
       const output = await extractor(texts, { pooling: 'mean', normalize: true });
@@ -247,6 +283,17 @@ function createEmbeddingProvider(): EmbeddingProvider {
       );
     case 'transformers':
       return new TransformersEmbedding(config.embeddingModel);
+    case 'voyage':
+      if (!config.voyageApiKey) {
+        throw new Error('VOYAGE_API_KEY is required when EMBEDDING_PROVIDER=voyage');
+      }
+      return new VoyageEmbedding(
+        config,
+        config.voyageApiKey,
+        config.voyageDocumentModel,
+        config.voyageQueryModel,
+        config.embeddingDimensions,
+      );
     default:
       throw new Error(`Unknown embedding provider: ${config.embeddingProvider}`);
   }
@@ -263,14 +310,39 @@ function setEmbeddingDimensions(dimensions: number): void {
   embeddingCache.clear();
 }
 
+function effectiveModel(task: EmbeddingTask): string {
+  const config = requireConfig();
+  if (config.embeddingProvider === 'voyage') {
+    return task === 'query' ? config.voyageQueryModel : config.voyageDocumentModel;
+  }
+  return config.embeddingModel;
+}
+
+function endpointMarker(): string {
+  const config = requireConfig();
+  switch (config.embeddingProvider) {
+    case 'openai':
+      return 'openai:api.openai.com';
+    case 'openai-compatible':
+      return `compat:${config.embeddingApiUrl ?? ''}`;
+    case 'ollama':
+      return `ollama:${config.ollamaBaseUrl}`;
+    case 'transformers':
+      return 'transformers:local';
+    case 'voyage':
+      return `voyage:${VOYAGE_API_BASE}`;
+  }
+}
+
 function getProviderKey(): string {
   const config = requireConfig();
   return [
     config.embeddingProvider,
-    config.embeddingModel,
     config.embeddingDimensions,
-    config.embeddingApiUrl ?? '',
-    config.ollamaBaseUrl,
+    endpointMarker(),
+    config.embeddingModel,
+    config.voyageDocumentModel,
+    config.voyageQueryModel,
   ].join('|');
 }
 
@@ -308,28 +380,42 @@ function getInstructionPrefix(model: string, task: EmbeddingTask): string {
 
 /**
  * LRU embedding cache — avoids redundant API calls for identical text within
- * and across requests. Keyed by text content, bounded by max entries.
+ * and across requests. The key includes provider, endpoint, model, dimensions,
+ * and task so query/document embeddings of the same text never collide.
  */
 const EMBEDDING_CACHE_MAX = 512;
 const embeddingCache = new Map<string, number[]>();
 
-function getCachedEmbedding(text: string): number[] | undefined {
-  const cached = embeddingCache.get(text);
+function embeddingCacheKey(text: string, task: EmbeddingTask): string {
+  const config = requireConfig();
+  const parts = [
+    config.embeddingProvider,
+    effectiveModel(task),
+    String(config.embeddingDimensions),
+    endpointMarker(),
+    task,
+    text,
+  ].join('\0');
+  return createHash('sha256').update(parts).digest('hex').slice(0, 16);
+}
+
+function getCachedEmbedding(key: string): number[] | undefined {
+  const cached = embeddingCache.get(key);
   if (cached) {
     // Move to end (most recently used)
-    embeddingCache.delete(text);
-    embeddingCache.set(text, cached);
+    embeddingCache.delete(key);
+    embeddingCache.set(key, cached);
   }
   return cached;
 }
 
-function setCachedEmbedding(text: string, embedding: number[]): void {
+function setCachedEmbedding(key: string, embedding: number[]): void {
   if (embeddingCache.size >= EMBEDDING_CACHE_MAX) {
     // Evict oldest (first entry)
     const oldest = embeddingCache.keys().next().value;
     if (oldest !== undefined) embeddingCache.delete(oldest);
   }
-  embeddingCache.set(text, embedding);
+  embeddingCache.set(key, embedding);
 }
 
 /**
@@ -337,23 +423,19 @@ function setCachedEmbedding(text: string, embedding: number[]): void {
  * Eliminates API transport variance and saves API calls during eval runs.
  * Enabled via EMBEDDING_CACHE_ENABLED=true; reuses EXTRACTION_CACHE_DIR.
  */
-function embeddingDiskCacheKey(text: string): string {
-  return createHash('sha256').update(text).digest('hex').slice(0, 16);
-}
-
-function readDiskEmbedding(text: string): number[] | null {
+function readDiskEmbedding(key: string): number[] | null {
   const config = requireConfig();
   if (!config.embeddingCacheEnabled) return null;
-  const filePath = join(config.extractionCacheDir, `emb-${embeddingDiskCacheKey(text)}.json`);
+  const filePath = join(config.extractionCacheDir, `emb-${key}.json`);
   if (!existsSync(filePath)) return null;
   return JSON.parse(readFileSync(filePath, 'utf-8')) as number[];
 }
 
-function writeDiskEmbedding(text: string, embedding: number[]): void {
+function writeDiskEmbedding(key: string, embedding: number[]): void {
   const config = requireConfig();
   if (!config.embeddingCacheEnabled) return;
   mkdirSync(config.extractionCacheDir, { recursive: true });
-  const filePath = join(config.extractionCacheDir, `emb-${embeddingDiskCacheKey(text)}.json`);
+  const filePath = join(config.extractionCacheDir, `emb-${key}.json`);
   const tmpPath = `${filePath}.tmp`;
   writeFileSync(tmpPath, JSON.stringify(embedding), 'utf-8');
   renameSync(tmpPath, filePath);
@@ -361,23 +443,23 @@ function writeDiskEmbedding(text: string, embedding: number[]): void {
 
 /** Embed a single text — primary API used throughout the codebase. */
 export async function embedText(text: string, task: EmbeddingTask = 'document'): Promise<number[]> {
-  const config = requireConfig();
-  const prefix = getInstructionPrefix(config.embeddingModel, task);
+  const prefix = getInstructionPrefix(effectiveModel(task), task);
   const finalInput = prefix + text;
+  const key = embeddingCacheKey(finalInput, task);
 
-  const cached = getCachedEmbedding(finalInput);
+  const cached = getCachedEmbedding(key);
   if (cached) return cached;
 
   // Check disk cache before hitting the API
-  const diskCached = readDiskEmbedding(finalInput);
+  const diskCached = readDiskEmbedding(key);
   if (diskCached) {
-    setCachedEmbedding(finalInput, diskCached);
+    setCachedEmbedding(key, diskCached);
     return diskCached;
   }
 
-  const embedding = await getProvider().embed(finalInput);
-  setCachedEmbedding(finalInput, embedding);
-  writeDiskEmbedding(finalInput, embedding);
+  const embedding = await getProvider().embed(finalInput, task);
+  setCachedEmbedding(key, embedding);
+  writeDiskEmbedding(key, embedding);
   return embedding;
 }
 
@@ -385,11 +467,11 @@ export async function embedText(text: string, task: EmbeddingTask = 'document'):
 export async function embedTexts(texts: string[], task: EmbeddingTask = 'document'): Promise<number[][]> {
   if (texts.length === 0) return [];
 
-  const config = requireConfig();
-  const prefix = getInstructionPrefix(config.embeddingModel, task);
+  const prefix = getInstructionPrefix(effectiveModel(task), task);
   const inputs = texts.map((t) => prefix + t);
+  const keys = inputs.map((input) => embeddingCacheKey(input, task));
 
-  const results: Array<number[] | null> = inputs.map((t) => getCachedEmbedding(t) ?? null);
+  const results: Array<number[] | null> = keys.map((key) => getCachedEmbedding(key) ?? null);
   const uncachedIndices = results.reduce<number[]>((acc, r, i) => {
     if (r === null) acc.push(i);
     return acc;
@@ -397,11 +479,11 @@ export async function embedTexts(texts: string[], task: EmbeddingTask = 'documen
 
   if (uncachedIndices.length > 0) {
     const uncachedInputs = uncachedIndices.map((i) => inputs[i]);
-    const freshEmbeddings = await getProvider().embedBatch(uncachedInputs);
+    const freshEmbeddings = await getProvider().embedBatch(uncachedInputs, task);
     for (let j = 0; j < uncachedIndices.length; j++) {
       const idx = uncachedIndices[j];
       results[idx] = freshEmbeddings[j];
-      setCachedEmbedding(inputs[idx], freshEmbeddings[j]);
+      setCachedEmbedding(keys[idx], freshEmbeddings[j]);
     }
   }
 
@@ -426,8 +508,8 @@ export function clearEmbeddingCache(): void {
 export async function resolveEmbeddingDimensions(): Promise<number> {
   const config = requireConfig();
   const p = getProvider();
-  console.log(`[embedding] resolveEmbeddingDimensions: using provider ${p.constructor.name} for model ${config.embeddingModel}`);
-  const embedding = await p.embed('dimension probe');
+  console.log(`[embedding] resolveEmbeddingDimensions: using provider ${p.constructor.name} for model ${effectiveModel('document')}`);
+  const embedding = await p.embed('dimension probe', 'document');
   const actualDimensions = embedding.length;
   console.log(`[embedding] resolveEmbeddingDimensions: actual length returned is ${actualDimensions}`);
   if (actualDimensions !== config.embeddingDimensions) {

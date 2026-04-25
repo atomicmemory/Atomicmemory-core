@@ -22,11 +22,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createMemoryRouter } from '../routes/memories.js';
 import type { MemoryService } from '../services/memory-service.js';
 import { type BootedApp, bindEphemeral } from '../app/bind-ephemeral.js';
+import { config, type RuntimeConfig } from '../config.js';
 
 const ROUTE_CONFIG = {
   retrievalProfile: 'override-test-profile',
   embeddingProvider: 'openai' as const,
   embeddingModel: 'm',
+  voyageDocumentModel: 'voyage-4-large',
+  voyageQueryModel: 'voyage-4-lite',
   llmProvider: 'openai' as const,
   llmModel: 'm',
   clarificationConflictThreshold: 0.9,
@@ -39,6 +42,10 @@ const ROUTE_CONFIG = {
   repairLoopEnabled: false,
   runtimeConfigMutationEnabled: true,
 };
+
+function routeBaseConfig(): RuntimeConfig {
+  return { ...config, ...ROUTE_CONFIG, retrievalProfile: config.retrievalProfile };
+}
 
 describe('POST /memories/* — per-request config_override', () => {
   let booted: BootedApp;
@@ -81,7 +88,11 @@ describe('POST /memories/* — per-request config_override', () => {
       getLessons: vi.fn(), getLessonStats: vi.fn(), reportLesson: vi.fn(), deactivateLesson: vi.fn(),
     } as unknown as MemoryService;
 
-    const adapter = { current: () => ({ ...ROUTE_CONFIG }), update: () => [] };
+    const adapter = {
+      base: routeBaseConfig,
+      current: () => ({ ...ROUTE_CONFIG }),
+      update: () => [],
+    };
     const app = express();
     app.use(express.json());
     app.use('/memories', createMemoryRouter(service, adapter));
@@ -121,6 +132,21 @@ describe('POST /memories/* — per-request config_override', () => {
     const options = call[2] as { effectiveConfig: { hybridSearchEnabled: boolean; mmrLambda: number } };
     expect(options.effectiveConfig.hybridSearchEnabled).toBe(true);
     expect(options.effectiveConfig.mmrLambda).toBe(0.8);
+  });
+
+  it('POST /search with override → overlays the injected runtime config', async () => {
+    const res = await postJson(`/memories/search`, {
+        user_id: 'u', query: 'q',
+        config_override: { hybridSearchEnabled: true },
+      });
+    expect(res.status).toBe(200);
+    const call = scopedSearch.mock.calls[0]!;
+    const options = call[2] as {
+      effectiveConfig: { embeddingModel: string; maxSearchResults: number; hybridSearchEnabled: boolean };
+    };
+    expect(options.effectiveConfig.embeddingModel).toBe('m');
+    expect(options.effectiveConfig.maxSearchResults).toBe(20);
+    expect(options.effectiveConfig.hybridSearchEnabled).toBe(true);
   });
 
   it('POST /search/fast with override → headers and fast:true both set', async () => {

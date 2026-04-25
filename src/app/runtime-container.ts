@@ -11,7 +11,13 @@
  */
 
 import pg from 'pg';
-import { config, updateRuntimeConfig, type CrossEncoderDtype } from '../config.js';
+import {
+  applyRuntimeConfigUpdates,
+  config as defaultConfig,
+  type CrossEncoderDtype,
+  type RuntimeConfig,
+  type RuntimeConfigUpdates,
+} from '../config.js';
 import { AgentTrustRepository } from '../db/agent-trust-repository.js';
 import { ClaimRepository } from '../db/claim-repository.js';
 import { LinkRepository } from '../db/link-repository.js';
@@ -41,24 +47,20 @@ import {
  * it describes the config surface already threaded through those seams
  * today, without claiming full runtime-wide configurability yet.
  *
- * NOTE (phase 1b status): `runtime.config` still references the
- * module-level singleton object. MemoryService accepts an optional
- * `runtimeConfig` override (stored as deps.config), and the search-
+ * NOTE (phase 1b status): `runtime.config` is normally the module-level
+ * singleton, but benchmark harnesses may pass an explicit composition-time
+ * RuntimeConfig through `createCoreRuntime({ config })`. MemoryService accepts
+ * an optional runtimeConfig override (stored as deps.config), and the search-
  * pipeline orchestration and ingest orchestration files (memory-ingest,
  * memory-storage, memory-audn, memory-lineage) read the fields listed
  * in `CoreRuntimeConfig` and `IngestRuntimeConfig` through deps.config
  * rather than the singleton. The route layer reads through an injectable
- * adapter seam (`configRouteAdapter`), but the default adapter
- * implementation still reads the module singleton directly — it is not
- * a genuinely independent config path.
+ * adapter seam (`configRouteAdapter`) backed by this runtime config object.
  *
- * Critically, the threaded orchestration files still call leaf modules
- * that read the singleton: embedding.ts (provider/model selection),
- * llm.ts, consensus-extraction.ts, write-security.ts, etc. Two
- * runtimes with different configs would diverge only on the fields
- * explicitly in `CoreRuntimeConfig` / `IngestRuntimeConfig`; any field
- * read by a leaf module (embedding provider, LLM model, extraction
- * settings) would silently share the singleton value.
+ * Leaf modules initialized by this composition root (embedding.ts and llm.ts)
+ * are rebound to the runtime config. Other leaf helpers still import the
+ * singleton directly, so config overrides are intended for isolated single-
+ * runtime harnesses, not multiple concurrently-active runtimes in one process.
  *
  * Remaining singleton importers: 33 non-test source files (tracked by
  * config-singleton-audit.test.ts). This includes infrastructure, CRUD/
@@ -129,13 +131,9 @@ export interface CoreRuntimeServices {
 }
 
 export interface CoreRuntimeConfigRouteAdapter {
+  base: () => RuntimeConfig;
   current: () => RuntimeConfigRouteSnapshot;
-  update: (updates: {
-    similarityThreshold?: number;
-    audnCandidateThreshold?: number;
-    clarificationConflictThreshold?: number;
-    maxSearchResults?: number;
-  }) => string[];
+  update: (updates: RuntimeConfigUpdates) => string[];
 }
 
 /**
@@ -144,19 +142,19 @@ export interface CoreRuntimeConfigRouteAdapter {
  * `pool` is required — the composition root never reaches around to
  * import the singleton `pg.Pool` itself.
  *
- * A `config` override is deliberately NOT accepted here. The container
- * now owns several explicit config seams, but many downstream services
- * and repositories still read the module singleton directly. Accepting
- * an override here would therefore apply only partially and misstate the
- * current architecture.
+ * Optional `config` is a composition-time override for isolated harnesses
+ * such as AtomicBench. It is not a per-request override and should not be
+ * used for multiple concurrently-active runtimes in one process while
+ * singleton-importing leaf modules remain.
  */
 export interface CoreRuntimeDeps {
   pool: pg.Pool;
+  config?: RuntimeConfig;
 }
 
 /** The composed runtime — single source of truth for route registration. */
 export interface CoreRuntime {
-  config: CoreRuntimeConfig;
+  config: RuntimeConfig;
   configRouteAdapter: CoreRuntimeConfigRouteAdapter;
   pool: pg.Pool;
   repos: CoreRuntimeRepos;
@@ -167,28 +165,29 @@ export interface CoreRuntime {
 
 /**
  * Compose the core runtime. Instantiates repositories and the memory
- * service from an explicit pool. Reads the module-level config singleton
- * for repo-construction flags and passes that same singleton explicitly
- * into MemoryService so the composition root owns the config seam.
+ * service from an explicit pool. Uses either the module-level config singleton
+ * or an explicit composition-time config and passes that same object into leaf
+ * module initializers and MemoryService so the composition root owns the seam.
  * No mutation.
  */
 export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
   const { pool } = deps;
+  const runtimeConfig = deps.config ?? defaultConfig;
 
   // Leaf-module config init (Phase 7 Step 3d). Embedding and LLM modules
   // hold module-local config bound here at composition-root time.
   // Provider/model selection is startup-only (Step 3c), so rebinding
   // only happens via explicit init call (e.g., from tests that swap
   // providers).
-  initEmbedding(config);
-  initLlm(config);
+  initEmbedding(runtimeConfig);
+  initLlm(runtimeConfig);
 
   const memory = new MemoryRepository(pool);
   const claims = new ClaimRepository(pool);
   const trust = new AgentTrustRepository(pool);
   const links = new LinkRepository(pool);
-  const entities = config.entityGraphEnabled ? new EntityRepository(pool) : null;
-  const lessons = config.lessonsEnabled ? new LessonRepository(pool) : null;
+  const entities = runtimeConfig.entityGraphEnabled ? new EntityRepository(pool) : null;
+  const lessons = runtimeConfig.lessonsEnabled ? new LessonRepository(pool) : null;
 
   const stores: CoreStores = {
     memory: new PgMemoryStore(pool),
@@ -208,18 +207,21 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     entities ?? undefined,
     lessons ?? undefined,
     undefined,
-    config,
+    runtimeConfig,
     stores,
   );
 
   return {
-    config,
+    config: runtimeConfig,
     configRouteAdapter: {
+      base() {
+        return runtimeConfig;
+      },
       current() {
-        return readRuntimeConfigRouteSnapshot(config);
+        return readRuntimeConfigRouteSnapshot(runtimeConfig);
       },
       update(updates) {
-        return updateRuntimeConfig(updates);
+        return applyRuntimeConfigUpdates(runtimeConfig, updates);
       },
     },
     pool,

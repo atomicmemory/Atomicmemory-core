@@ -11,7 +11,7 @@ import {
   type RetrievalProfileName,
 } from './services/retrieval-profiles.js';
 
-export type EmbeddingProviderName = 'openai' | 'ollama' | 'openai-compatible' | 'transformers';
+export type EmbeddingProviderName = 'openai' | 'ollama' | 'openai-compatible' | 'transformers' | 'voyage';
 export type LLMProviderName = EmbeddingProviderName | 'groq' | 'anthropic' | 'google-genai';
 export type VectorBackendName = 'pgvector' | 'ruvector-mock' | 'zvec-mock';
 export type CrossEncoderDtype = 'auto' | 'fp32' | 'fp16' | 'q8' | 'int8' | 'uint8' | 'q4' | 'bnb4' | 'q4f16';
@@ -56,6 +56,9 @@ export interface RuntimeConfig {
   embeddingDimensions: number;
   embeddingApiUrl?: string;
   embeddingApiKey?: string;
+  voyageApiKey?: string;
+  voyageDocumentModel: string;
+  voyageQueryModel: string;
   llmProvider: LLMProviderName;
   llmModel: string;
   llmApiUrl?: string;
@@ -145,12 +148,14 @@ export interface RuntimeConfig {
 
 /**
  * Fields accepted by `updateRuntimeConfig()`. Provider/model selection
- * (embeddingProvider, embeddingModel, llmProvider, llmModel) is intentionally
- * absent: embedding.ts and llm.ts cache stateful provider instances at first
- * call, so mid-flight mutation never took effect in v1. Freezing these as
- * startup-only is a bug fix. Set them via env before process start.
+ * (embeddingProvider, embeddingModel, voyage*, llmProvider, llmModel) is
+ * intentionally absent: embedding.ts and llm.ts cache stateful provider
+ * instances at first call, so mid-flight mutation never took effect in v1.
+ * Freezing these as composition-time config is a bug fix. Server deployments
+ * still use env-backed startup config; isolated harnesses can pass an explicit
+ * RuntimeConfig to createCoreRuntime({ config }).
  */
-interface RuntimeConfigUpdates {
+export interface RuntimeConfigUpdates {
   similarityThreshold?: number;
   audnCandidateThreshold?: number;
   clarificationConflictThreshold?: number;
@@ -174,7 +179,7 @@ function parseEmbeddingProvider(
   fallback: EmbeddingProviderName,
 ): EmbeddingProviderName {
   if (!value) return fallback;
-  const valid: EmbeddingProviderName[] = ['openai', 'ollama', 'openai-compatible', 'transformers'];
+  const valid: EmbeddingProviderName[] = ['openai', 'ollama', 'openai-compatible', 'transformers', 'voyage'];
   if (!valid.includes(value as EmbeddingProviderName)) {
     throw new Error(`Invalid provider "${value}". Must be one of: ${valid.join(', ')}`);
   }
@@ -239,10 +244,12 @@ const needsOpenAIKey = embeddingProvider === 'openai' || llmProvider === 'openai
 const needsGroqKey = llmProvider === 'groq';
 const needsAnthropicKey = llmProvider === 'anthropic';
 const needsGoogleKey = llmProvider === 'google-genai';
+const needsVoyageKey = embeddingProvider === 'voyage';
 const groqApiKey = needsGroqKey ? requireEnv('GROQ_API_KEY') : optionalEnv('GROQ_API_KEY');
 const openaiApiKey = needsOpenAIKey ? requireEnv('OPENAI_API_KEY') : (optionalEnv('OPENAI_API_KEY') ?? '');
 const anthropicApiKey = needsAnthropicKey ? requireEnv('ANTHROPIC_API_KEY') : optionalEnv('ANTHROPIC_API_KEY');
 const googleApiKey = needsGoogleKey ? requireEnv('GOOGLE_API_KEY') : optionalEnv('GOOGLE_API_KEY');
+const voyageApiKey = needsVoyageKey ? requireEnv('VOYAGE_API_KEY') : optionalEnv('VOYAGE_API_KEY');
 
 export const config: RuntimeConfig = {
   databaseUrl: requireEnv('DATABASE_URL'),
@@ -286,6 +293,9 @@ export const config: RuntimeConfig = {
   embeddingDimensions: parseInt(requireEnv('EMBEDDING_DIMENSIONS'), 10),
   embeddingApiUrl: optionalEnv('EMBEDDING_API_URL'),
   embeddingApiKey: optionalEnv('EMBEDDING_API_KEY'),
+  voyageApiKey: voyageApiKey ?? undefined,
+  voyageDocumentModel: optionalEnv('VOYAGE_DOCUMENT_MODEL') ?? 'voyage-4-large',
+  voyageQueryModel: optionalEnv('VOYAGE_QUERY_MODEL') ?? 'voyage-4-lite',
 
   // LLM provider
   llmProvider,
@@ -374,30 +384,37 @@ export const config: RuntimeConfig = {
     (process.env.CORE_RUNTIME_CONFIG_MUTATION_ENABLED ?? 'false') === 'true',
 };
 
-export function updateRuntimeConfig(updates: RuntimeConfigUpdates): string[] {
+export function applyRuntimeConfigUpdates(
+  target: RuntimeConfig,
+  updates: RuntimeConfigUpdates,
+): string[] {
   const applied: string[] = [];
 
   if (updates.similarityThreshold !== undefined) {
-    config.similarityThreshold = requireFiniteNumber(updates.similarityThreshold, 'similarityThreshold');
+    target.similarityThreshold = requireFiniteNumber(updates.similarityThreshold, 'similarityThreshold');
     applied.push('similarityThreshold');
   }
   if (updates.audnCandidateThreshold !== undefined) {
-    config.audnCandidateThreshold = requireFiniteNumber(updates.audnCandidateThreshold, 'audnCandidateThreshold');
+    target.audnCandidateThreshold = requireFiniteNumber(updates.audnCandidateThreshold, 'audnCandidateThreshold');
     applied.push('audnCandidateThreshold');
   }
   if (updates.clarificationConflictThreshold !== undefined) {
-    config.clarificationConflictThreshold = requireFiniteNumber(
+    target.clarificationConflictThreshold = requireFiniteNumber(
       updates.clarificationConflictThreshold,
       'clarificationConflictThreshold',
     );
     applied.push('clarificationConflictThreshold');
   }
   if (updates.maxSearchResults !== undefined) {
-    config.maxSearchResults = Math.max(1, Math.floor(requireFiniteNumber(updates.maxSearchResults, 'maxSearchResults')));
+    target.maxSearchResults = Math.max(1, Math.floor(requireFiniteNumber(updates.maxSearchResults, 'maxSearchResults')));
     applied.push('maxSearchResults');
   }
 
   return applied;
+}
+
+export function updateRuntimeConfig(updates: RuntimeConfigUpdates): string[] {
+  return applyRuntimeConfigUpdates(config, updates);
 }
 
 /**
@@ -416,6 +433,7 @@ export const SUPPORTED_RUNTIME_CONFIG_FIELDS = [
   // Provider / model selection (startup config)
   'embeddingProvider', 'embeddingModel', 'embeddingDimensions',
   'embeddingApiUrl', 'embeddingApiKey',
+  'voyageApiKey', 'voyageDocumentModel', 'voyageQueryModel',
   'llmProvider', 'llmModel', 'llmApiUrl', 'llmApiKey',
   'groqApiKey', 'anthropicApiKey', 'googleApiKey',
   'ollamaBaseUrl', 'vectorBackend', 'skipVectorIndexes', 'llmSeed',

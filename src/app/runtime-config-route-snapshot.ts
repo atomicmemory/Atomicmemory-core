@@ -12,6 +12,8 @@ export interface RuntimeConfigRouteSnapshot {
   retrievalProfile: string;
   embeddingProvider: EmbeddingProviderName;
   embeddingModel: string;
+  voyageDocumentModel: string;
+  voyageQueryModel: string;
   llmProvider: LLMProviderName;
   llmModel: string;
   clarificationConflictThreshold: number;
@@ -30,6 +32,8 @@ export function readRuntimeConfigRouteSnapshot(config: RuntimeConfig): RuntimeCo
     retrievalProfile: config.retrievalProfile,
     embeddingProvider: config.embeddingProvider,
     embeddingModel: config.embeddingModel,
+    voyageDocumentModel: config.voyageDocumentModel,
+    voyageQueryModel: config.voyageQueryModel,
     llmProvider: config.llmProvider,
     llmModel: config.llmModel,
     clarificationConflictThreshold: config.clarificationConflictThreshold,
