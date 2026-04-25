@@ -22,6 +22,9 @@ import { prefersAbstractAwareRetrieval } from './abstract-query-policy.js';
 import type { RetrievalMode } from './memory-service-types.js';
 import { escapeXml } from '../xml-escape.js';
 import { spansMultipleDates, buildTimelinePack, formatTimelinePack } from './timeline-pack.js';
+import { buildRepeatedEventEndpointBlock } from './temporal-endpoint-evidence.js';
+import { preserveQueryTermVisibility, sumAssignmentTokens } from './query-term-visibility.js';
+import { formatDateLabel, formatDuration } from './temporal-format.js';
 
 /**
  * Packaging observability signal — records whether and how packaging
@@ -206,18 +209,6 @@ function getUniqueDates(memories: SearchResult[]): Date[] {
   return dates;
 }
 
-function formatDateLabel(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function formatDuration(days: number): string {
-  if (days < 7) return `${days} day${days !== 1 ? 's' : ''}`;
-  const weeks = Math.round(days / 7);
-  if (days < 30) return `~${weeks} week${weeks !== 1 ? 's' : ''} (${days} days)`;
-  const months = Math.round(days / 30);
-  return `~${months} month${months !== 1 ? 's' : ''} (${days} days)`;
-}
-
 function buildTemporalEvidenceLines(
   memories: SearchResult[],
   dates: Date[],
@@ -311,6 +302,7 @@ function truncateContent(content: string): string {
 export function formatTieredInjection(
   memories: SearchResult[],
   assignments: TierAssignment[],
+  query = '',
 ): string {
   if (memories.length === 0) return '';
   const sorted = sortChronologically(memories);
@@ -326,7 +318,11 @@ export function formatTieredInjection(
   const sections = expandableIds
     ? [lines.join('\n'), `Expandable IDs: ${expandableIds}`]
     : [lines.join('\n')];
-  return appendTemporalSummary(sections, memories);
+  const repeatedEventEndpoints = buildRepeatedEventEndpointBlock(sorted, query);
+  const enrichedSections = repeatedEventEndpoints
+    ? [...sections, repeatedEventEndpoints]
+    : sections;
+  return appendTemporalSummary(enrichedSections, memories);
 }
 
 function formatTieredLine(memory: SearchResult, tier: ContextTier): string {
@@ -346,11 +342,6 @@ function formatAge(date: Date): string {
 }
 
 const DEFAULT_INJECTION_TOKEN_BUDGET = 2000;
-const QUERY_TERM_MIN_LENGTH = 4;
-const QUERY_TERM_STOP_WORDS = new Set([
-  'what', 'when', 'where', 'which', 'with', 'from', 'that', 'this',
-  'recently', 'attend', 'attended', 'does', 'have', 'has', 'did',
-]);
 
 export interface InjectionBuildResult {
   injectionText: string;
@@ -382,74 +373,26 @@ export function buildInjection(
   const budget = tokenBudget ?? DEFAULT_INJECTION_TOKEN_BUDGET;
   const forceRichTopHit = prefersAbstractAwareRetrieval(mode, query);
 
-  const result = assignTierBudgets(deduplicated, budget, { forceRichTopHit });
-  const assignments = preserveQueryTermVisibility(deduplicated, result.assignments, query, budget);
+  // Compute the repeated-event endpoint block before tier assignment so
+  // its token cost is subtracted from the assignment budget. Otherwise the
+  // appended block silently exceeds the caller's budget and is missing
+  // from estimatedContextTokens. The block is appended inside
+  // formatTieredInjection; we just account for its tokens up front.
+  const sortedForEndpoints = sortChronologically(deduplicated);
+  const endpointBlock = buildRepeatedEventEndpointBlock(sortedForEndpoints, query);
+  const endpointTokens = endpointBlock ? estimateTokens(endpointBlock) : 0;
+  const assignmentBudget = Math.max(0, budget - endpointTokens);
+
+  const result = assignTierBudgets(deduplicated, assignmentBudget, { forceRichTopHit });
+  const assignments = preserveQueryTermVisibility(deduplicated, result.assignments, query, assignmentBudget);
   const expandIds = assignments
     .filter((a) => a.tier !== 'L2')
     .map((a) => a.memoryId);
 
   return {
-    injectionText: formatTieredInjection(deduplicated, assignments),
+    injectionText: formatTieredInjection(deduplicated, assignments, query),
     tierAssignments: assignments,
     expandIds: expandIds.length > 0 ? expandIds : undefined,
-    estimatedContextTokens: sumAssignmentTokens(assignments),
+    estimatedContextTokens: sumAssignmentTokens(assignments) + endpointTokens,
   };
-}
-
-function preserveQueryTermVisibility(
-  memories: SearchResult[],
-  assignments: TierAssignment[],
-  query: string,
-  tokenBudget: number,
-): TierAssignment[] {
-  const terms = extractQueryVisibilityTerms(query);
-  if (terms.length === 0) return assignments;
-
-  const nextAssignments = assignments.map((assignment) => ({ ...assignment }));
-  let remaining = tokenBudget - sumAssignmentTokens(nextAssignments);
-  for (const memory of memories) {
-    const index = nextAssignments.findIndex((assignment) => assignment.memoryId === memory.id);
-    if (index === -1 || nextAssignments[index].tier === 'L2') continue;
-    const upgraded = chooseVisibleTier(memory, nextAssignments[index], terms, remaining);
-    if (!upgraded) continue;
-    remaining -= upgraded.estimatedTokens - nextAssignments[index].estimatedTokens;
-    nextAssignments[index] = upgraded;
-  }
-  return nextAssignments;
-}
-
-function chooseVisibleTier(
-  memory: SearchResult,
-  assignment: TierAssignment,
-  terms: string[],
-  remainingBudget: number,
-): TierAssignment | null {
-  const current = getContentAtTier(memory, assignment.tier).toLowerCase();
-  const missingTerms = terms.filter((term) => !current.includes(term) && memory.content.toLowerCase().includes(term));
-  if (missingTerms.length === 0) return null;
-
-  for (const tier of ['L1', 'L2'] as const) {
-    const content = getContentAtTier(memory, tier).toLowerCase();
-    const revealsTerm = missingTerms.some((term) => content.includes(term));
-    const tokens = estimateTokens(content);
-    const extra = tokens - assignment.estimatedTokens;
-    if (revealsTerm && extra <= remainingBudget) {
-      return { memoryId: memory.id, tier, estimatedTokens: tokens };
-    }
-  }
-  return null;
-}
-
-function extractQueryVisibilityTerms(query: string): string[] {
-  const terms = query
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((term) => term.length >= QUERY_TERM_MIN_LENGTH)
-    .filter((term) => !QUERY_TERM_STOP_WORDS.has(term));
-  return [...new Set(terms)];
-}
-
-function sumAssignmentTokens(assignments: Array<{ estimatedTokens: number }>): number {
-  return assignments.reduce((sum, assignment) => sum + assignment.estimatedTokens, 0);
 }

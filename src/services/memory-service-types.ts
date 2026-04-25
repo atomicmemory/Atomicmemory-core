@@ -201,10 +201,14 @@ export interface IngestRuntimeConfig {
   audnCandidateThreshold: number;
   auditLoggingEnabled: boolean;
   chunkedExtractionEnabled: boolean;
+  chunkedExtractionFallbackEnabled: boolean;
+  chunkSizeTurns: number;
+  chunkOverlapTurns: number;
   compositeGroupingEnabled: boolean;
   compositeMinClusterSize: number;
   consensusExtractionEnabled: boolean;
   consensusExtractionRuns: number;
+  extractionCacheEnabled: boolean;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
   entityGraphEnabled: boolean;

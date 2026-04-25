@@ -225,6 +225,25 @@ describe('formatTieredInjection', () => {
     expect(result).toContain('- 2022-08-10: James met Samantha.');
     expect(result).toContain('- 2022-10-31: James and Samantha decided to move in.');
   });
+
+  it('adds repeated-event endpoints when the query asks for first and second events', () => {
+    const memories = [
+      makeResult({ id: 'first', content: "Sam had a check-up with Sam's doctor.", created_at: new Date('2023-05-24T00:00:00Z') }),
+      makeResult({ id: 'second', content: "Sam had a doctor's appointment.", created_at: new Date('2023-08-15T00:00:00Z') }),
+    ];
+    const assignments = [
+      { memoryId: 'first', tier: 'L2' as const, estimatedTokens: 5 },
+      { memoryId: 'second', tier: 'L2' as const, estimatedTokens: 5 },
+    ];
+    const result = formatTieredInjection(
+      memories,
+      assignments,
+      "How many months lapsed between Sam's first and second doctor's appointment?",
+    );
+
+    expect(result).toContain('Repeated event endpoints:');
+    expect(result).toContain('elapsed between endpoints: ~3 months (83 days)');
+  });
 });
 
 describe('formatSimpleInjection', () => {

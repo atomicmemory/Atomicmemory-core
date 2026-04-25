@@ -10,25 +10,14 @@ import { type AUDNDecision } from './extraction.js';
 import { cachedResolveAUDN } from './extraction-cache.js';
 import { applyOpinionSignal, audnActionToOpinionSignal } from './memory-network.js';
 import { buildAtomicFactProjection, buildForesightProjections } from './memcell-projection.js';
-import {
-  applyClarificationOverrides,
-  mergeCandidates,
-  type CandidateMemory,
-} from './conflict-policy.js';
+import { applyClarificationOverrides, mergeCandidates, type CandidateMemory } from './conflict-policy.js';
 import { emitAuditEvent } from './audit-events.js';
 import { recordContradictionLesson } from './lesson-service.js';
 import { shouldDeferAudn, deferMemoryForReconciliation } from './deferred-audn.js';
 import { timed } from './timing.js';
 import { emitLineageEvent } from './memory-lineage.js';
 import { storeCanonicalFact, storeProjection, applyEntityScopedDedup, ensureClaimTarget, findConflictCandidates, findSlotConflictCandidates } from './memory-storage.js';
-import type {
-  AudnFactContext,
-  ClaimTarget,
-  FactInput,
-  FactResult,
-  MemoryServiceDeps,
-  Outcome,
-} from './memory-service-types.js';
+import type { AudnFactContext, ClaimTarget, FactInput, FactResult, MemoryServiceDeps, Outcome } from './memory-service-types.js';
 
 /** Find conflict candidates, merge slot-aware candidates, and filter out superseded. */
 export async function findFilteredCandidates(
@@ -148,7 +137,8 @@ async function tryOpinionIntercept(
       userId: ctx.userId, content: ctx.fact.fact, embedding: ctx.embedding, memoryType: 'episodic', importance: ctx.fact.importance,
       sourceSite: ctx.sourceSite, sourceUrl: ctx.sourceUrl, episodeId: ctx.episodeId, status: 'needs_clarification',
       metadata: { clarification_note: 'Opinion confidence dropped to zero', target_memory_id: decision.targetMemoryId },
-      trustScore: ctx.trustScore, network: 'opinion', opinionConfidence: 0, createdAt: ctx.logicalTimestamp,
+      trustScore: ctx.trustScore, network: 'opinion', opinionConfidence: 0,
+      createdAt: ctx.logicalTimestamp, observedAt: ctx.logicalTimestamp,
       workspaceId: ctx.workspace?.workspaceId, agentId: ctx.workspace?.agentId, visibility: ctx.workspace?.visibility,
     });
   }
@@ -174,7 +164,7 @@ async function storeClarification(
       target_memory_id: decision.targetMemoryId ?? undefined,
       contradiction_confidence: decision.contradictionConfidence ?? undefined,
     },
-    trustScore: ctx.trustScore, createdAt: ctx.logicalTimestamp,
+    trustScore: ctx.trustScore, createdAt: ctx.logicalTimestamp, observedAt: ctx.logicalTimestamp,
     workspaceId: ctx.workspace?.workspaceId, agentId: ctx.workspace?.agentId, visibility: ctx.workspace?.visibility,
   });
   return { outcome: 'skipped' as Outcome, memoryId: null };
@@ -262,7 +252,10 @@ async function supersedeCanonicalFact(
 ): Promise<{ outcome: Outcome; memoryId: string | null }> {
   const target = await ensureClaimTarget(deps, userId, targetMemoryId);
   await deps.stores.memory.expireMemory(userId, target.memoryId);
-  const newMemoryId = await storeProjection(deps, userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore ?? 1.0, undefined, workspace);
+  const newMemoryId = await storeProjection(deps, userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore ?? 1.0, {
+    logicalTimestamp,
+    workspace,
+  });
   if (!newMemoryId) return { outcome: 'skipped', memoryId: null };
   const lineage = await emitLineageEvent({ claims: deps.stores.claim, repo: deps.stores.memory, config: deps.config }, {
     kind: 'canonical-supersede',

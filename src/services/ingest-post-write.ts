@@ -128,6 +128,7 @@ async function generateAndStoreComposites(
       overview: composite.overview,
       trustScore: 1.0,
       createdAt: sessionTimestamp,
+      observedAt: sessionTimestamp,
       namespace: namespace ?? undefined,
       metadata: {
         memberMemoryIds: composite.memberMemoryIds,

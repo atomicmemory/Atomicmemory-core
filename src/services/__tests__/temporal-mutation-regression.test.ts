@@ -166,7 +166,7 @@ describe('temporal mutation regression', () => {
     await ctx.service.ingest(TEST_USER, clarifyConversation, 'test', '', clarifyAt);
 
     const clarificationRows = await pool.query(
-      `SELECT content, status, created_at, metadata
+      `SELECT content, status, created_at, observed_at, metadata
        FROM memories
        WHERE user_id = $1 AND status = 'needs_clarification'`,
       [TEST_USER],
@@ -184,6 +184,7 @@ describe('temporal mutation regression', () => {
     expect(clarificationRows.rows[0].content).toContain('June 16');
     expect(clarificationRows.rows[0].status).toBe('needs_clarification');
     expect(new Date(clarificationRows.rows[0].created_at).toISOString()).toBe(clarifyAt.toISOString());
+    expect(new Date(clarificationRows.rows[0].observed_at).toISOString()).toBe(clarifyAt.toISOString());
     expect(claim?.current_version_id).toBe(originalVersion!.id);
     expect(versions).toHaveLength(1);
     expect(await ctx.repo.countNeedsClarification(TEST_USER)).toBe(1);

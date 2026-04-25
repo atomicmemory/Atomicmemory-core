@@ -164,7 +164,30 @@ describe('applyClarificationOverrides', () => {
       'preference',
     );
 
-    expect(decision.action).not.toBe('ADD');
+    expect(decision.action).toBe('SUPERSEDE');
+  });
+
+  it('does not clarify explicit replacements when contradiction confidence is low', () => {
+    const decision = applyClarificationOverrides(
+      makeDecision({
+        action: 'SUPERSEDE',
+        targetMemoryId: 'cand-1',
+        updatedContent: null,
+        contradictionConfidence: 0.3,
+      }),
+      "As of March 10, 2026, user's emergency contact is Bob Chen at 555-0199, replacing Alice Morgan.",
+      [
+        makeCandidate({
+          content: "User's emergency contact is Alice Morgan at 555-0101.",
+          similarity: 0.73,
+          importance: 0.8,
+        }),
+      ],
+      ['Bob Chen', 'Alice Morgan', '555-0199'],
+      'person',
+    );
+
+    expect(decision.action).toBe('SUPERSEDE');
   });
 
   it('allows SUPERSEDE when correction: marker is present', () => {
@@ -187,7 +210,7 @@ describe('applyClarificationOverrides', () => {
       'preference',
     );
 
-    expect(decision.action).not.toBe('ADD');
+    expect(decision.action).toBe('SUPERSEDE');
   });
 
   it('blocks SUPERSEDE of critical memory when no correction signal exists', () => {
@@ -233,5 +256,82 @@ describe('applyClarificationOverrides', () => {
 
     expect(decision.action).toBe('ADD');
     expect(decision.targetMemoryId).toBeNull();
+  });
+
+  it('does not treat medical check-up facts as uncertain language', () => {
+    const decision = applyClarificationOverrides(
+      makeDecision({ action: 'ADD', targetMemoryId: null, updatedContent: null }),
+      "Sam had a check-up with Sam's doctor a few days ago.",
+      [
+        makeCandidate({
+          content: 'Sam is working on healthier habits.',
+          similarity: 0.83,
+        }),
+      ],
+      ['doctor', 'check-up'],
+      'knowledge',
+    );
+
+    expect(decision.action).toBe('ADD');
+  });
+
+  it('upgrades CLARIFY with a valid target + explicit replacement to SUPERSEDE', () => {
+    const decision = applyClarificationOverrides(
+      makeDecision({
+        action: 'CLARIFY',
+        targetMemoryId: 'cand-1',
+        updatedContent: null,
+        contradictionConfidence: 0.4,
+        clarificationNote: 'AUDN uncertain — needs user confirmation',
+      }),
+      'Replacing my advisor Alice Morgan with Bob Chen.',
+      [makeCandidate({ content: 'My advisor is Alice Morgan.' })],
+      ['advisor', 'Bob', 'Chen'],
+      'person',
+    );
+
+    expect(decision.action).toBe('SUPERSEDE');
+    expect(decision.targetMemoryId).toBe('cand-1');
+  });
+
+  it('keeps CLARIFY when explicit replacement signal has no identified target', () => {
+    const decision = applyClarificationOverrides(
+      makeDecision({
+        action: 'CLARIFY',
+        targetMemoryId: null,
+        updatedContent: null,
+        contradictionConfidence: 0.4,
+        clarificationNote: 'AUDN uncertain',
+      }),
+      'No longer using the old workflow.',
+      [makeCandidate({ similarity: 0.6 })],
+      ['workflow'],
+      'knowledge',
+    );
+
+    expect(decision.action).toBe('CLARIFY');
+    expect(decision.targetMemoryId).toBeNull();
+  });
+
+  it('keeps CLARIFY when explicit replacement target is not in the candidate set', () => {
+    // AUDN returned a stale/invalid targetMemoryId. Superseding would be
+    // rejected downstream by memory-audn (missing target), falling back
+    // to canonical storage and leaving the old memory active. Defer to
+    // the user instead.
+    const decision = applyClarificationOverrides(
+      makeDecision({
+        action: 'CLARIFY',
+        targetMemoryId: 'stale-id-not-in-candidates',
+        updatedContent: null,
+        contradictionConfidence: 0.4,
+      }),
+      'Replacing my advisor Alice Morgan with Bob Chen.',
+      [makeCandidate({ id: 'cand-1', content: 'My advisor is Alice Morgan.' })],
+      ['advisor', 'Bob', 'Chen'],
+      'person',
+    );
+
+    expect(decision.action).toBe('CLARIFY');
+    expect(decision.targetMemoryId).toBe('stale-id-not-in-candidates');
   });
 });

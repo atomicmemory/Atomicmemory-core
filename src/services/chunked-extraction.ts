@@ -9,12 +9,17 @@
  * using embedding similarity.
  */
 
-import { config } from '../config.js';
 import { extractFacts, type ExtractionOptions, type ExtractedFact } from './extraction.js';
 import { cachedExtractFacts } from './extraction-cache.js';
 import { cosineSimilarity, embedText } from './embedding.js';
 
 const DEDUP_SIMILARITY_THRESHOLD = 0.92;
+
+export interface ChunkedExtractionConfig {
+  chunkSizeTurns: number;
+  chunkOverlapTurns: number;
+  extractionCacheEnabled: boolean;
+}
 
 /**
  * Split conversation text into overlapping turn-based chunks.
@@ -66,15 +71,16 @@ function chunkConversation(
 export async function chunkedExtractFacts(
   conversationText: string,
   options: ExtractionOptions = {},
+  chunking: ChunkedExtractionConfig,
 ): Promise<ExtractedFact[]> {
   const chunks = chunkConversation(
     conversationText,
-    config.chunkSizeTurns,
-    config.chunkOverlapTurns,
+    chunking.chunkSizeTurns,
+    chunking.chunkOverlapTurns,
   );
 
   if (chunks.length <= 1) {
-    return config.extractionCacheEnabled
+    return chunking.extractionCacheEnabled
       ? cachedExtractFacts(conversationText, options)
       : extractFacts(conversationText, options);
   }
@@ -82,7 +88,7 @@ export async function chunkedExtractFacts(
   // Extract facts from each chunk
   const allFacts: ExtractedFact[] = [];
   for (const chunk of chunks) {
-    const facts = config.extractionCacheEnabled
+    const facts = chunking.extractionCacheEnabled
       ? await cachedExtractFacts(chunk, options)
       : await extractFacts(chunk, options);
     allFacts.push(...facts);

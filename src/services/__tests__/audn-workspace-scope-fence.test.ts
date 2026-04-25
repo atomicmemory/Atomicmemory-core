@@ -73,6 +73,7 @@ describe('AUDN workspace scope fences', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('CLARIFY branch carries workspace scope into storeMemory', async () => {
+    const logicalTimestamp = new Date('2026-02-18T00:00:00.000Z');
     const clarifyDecision = {
       action: 'CLARIFY', targetMemoryId: 'target-1',
       clarificationNote: 'ambiguous', contradictionConfidence: 0.4,
@@ -82,7 +83,7 @@ describe('AUDN workspace scope fences', () => {
 
     await resolveAndExecuteAudn(
       makeDeps(), 'u1', baseFact, [0.1, 0.2], 'site', 'url', 'ep1',
-      0.9, null, undefined, candidates, new Set(), workspace,
+      0.9, null, logicalTimestamp, candidates, new Set(), workspace,
     );
 
     expect(mockStoreMemory).toHaveBeenCalledWith(
@@ -91,11 +92,14 @@ describe('AUDN workspace scope fences', () => {
         agentId: 'agent-1',
         visibility: 'workspace',
         status: 'needs_clarification',
+        createdAt: logicalTimestamp,
+        observedAt: logicalTimestamp,
       }),
     );
   });
 
   it('opinion-confidence-collapse carries workspace scope into storeMemory', async () => {
+    const logicalTimestamp = new Date('2026-03-01T00:00:00.000Z');
     const deps = makeDeps();
     deps.stores.memory.getMemory.mockResolvedValue({
       id: 'target-1', network: 'opinion', opinion_confidence: 0.1,
@@ -107,7 +111,7 @@ describe('AUDN workspace scope fences', () => {
 
     await resolveAndExecuteAudn(
       deps, 'u1', opinionFact, [0.1, 0.2], 'site', 'url', 'ep1',
-      0.9, null, undefined, candidates, new Set(), workspace,
+      0.9, null, logicalTimestamp, candidates, new Set(), workspace,
     );
 
     // Opinion confidence dropped to 0 → storeMemory must be called with needs_clarification
@@ -117,6 +121,8 @@ describe('AUDN workspace scope fences', () => {
         workspaceId: 'ws-1',
         agentId: 'agent-1',
         status: 'needs_clarification',
+        createdAt: logicalTimestamp,
+        observedAt: logicalTimestamp,
       }),
     );
   });

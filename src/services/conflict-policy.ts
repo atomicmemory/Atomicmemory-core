@@ -13,7 +13,11 @@ export interface CandidateMemory {
   agent_id?: string;
 }
 
-const UNCERTAIN_MARKERS = ['maybe', 'might', 'not sure', 'i think', 'perhaps', 'check', 'tomorrow'];
+const UNCERTAIN_MARKERS = ['maybe', 'might', 'not sure', 'i think', 'perhaps', 'tomorrow'];
+const UNCERTAIN_PATTERNS = [
+  /\b(?:need|needs|needed|will|should)\s+to\s+check\b/i,
+  /\bcheck\s+(?:later|tomorrow|again|back)\b/i,
+];
 const GENERIC_CONFLICT_MARKERS = [
   'user',
   'users',
@@ -35,6 +39,26 @@ const SAFE_REUSE_MIN_SIMILARITY = config.audnSafeReuseMinSimilarity;
 const SAFE_REUSE_MIN_SHARED_KEYWORDS = 2;
 const TRANSITION_MARKERS = ['switched away from', 'switched from', 'migrated from', 'moved from', 'previously used'];
 
+interface PolicyContext {
+  decision: AUDNDecision;
+  factText: string;
+  candidates: CandidateMemory[];
+  factKeywords: string[];
+  factType: string | null;
+}
+
+type Policy = (ctx: PolicyContext) => AUDNDecision | null;
+
+const POLICIES: Policy[] = [
+  resolveExplicitReplacementOnClarify,
+  preserveLowConfidenceClarify,
+  detectUncertainConflict,
+  resolveCriticalConflict,
+  preserveRecommendationAttribution,
+  separateStateTransition,
+  supersedeInsteadOfUpdate,
+];
+
 export function applyClarificationOverrides(
   decision: AUDNDecision,
   factText: string,
@@ -42,28 +66,76 @@ export function applyClarificationOverrides(
   factKeywords: string[] = [],
   factType: string | null = null,
 ): AUDNDecision {
-  if (shouldClarifyConflict(decision)) return decision;
-  if (isUncertainConflict(factText, candidates)) return clarify(decision, 'Uncertain contradiction detected in new fact');
-  if (isCriticalConflict(decision, factText, candidates)) {
-    // If the new fact contradicts the critical memory, require clarification.
-    // Otherwise promote to ADD — keeps both the original and the new fact,
-    // preventing data loss when the new fact is a specialization (not a contradiction).
-    const target = resolveDecisionTarget(decision, candidates);
-    if (target && containsContradictionSignal(factText, target.content)) {
-      return clarify(decision, 'Critical existing memory requires clarification before replacement');
-    }
-    return promoteToAdd(decision);
-  }
-  if (shouldPreserveRecommendationAttribution(decision, factText, candidates)) {
-    return promoteToAdd(decision);
-  }
-  if (shouldSeparateStateTransition(decision, factText)) {
-    return promoteToAdd(decision);
-  }
-  if (shouldSupersedeInsteadOfUpdate(decision, factText, candidates)) {
-    return supersede(decision);
+  const ctx: PolicyContext = { decision, factText, candidates, factKeywords, factType };
+  for (const policy of POLICIES) {
+    const result = policy(ctx);
+    if (result !== null) return result;
   }
   return preserveAtomicFacts(decision, factText, candidates, factKeywords, factType);
+}
+
+/**
+ * AUDN returned CLARIFY but the new fact carries an explicit replacement
+ * signal ("replacing X", "no longer Y", "instead of Z", "correction: ..."):
+ *   - With a target that's present in the candidate set: upgrade to
+ *     SUPERSEDE so the stale memory is expired.
+ *   - Without a target, or with a stale/invalid target ID that doesn't
+ *     resolve to any candidate: keep the CLARIFY hold. memory-audn would
+ *     reject a SUPERSEDE against a missing target and fall back to
+ *     canonical storage, which leaves the old memory active — same bug
+ *     as routing through promoteToAdd.
+ */
+function resolveExplicitReplacementOnClarify(ctx: PolicyContext): AUDNDecision | null {
+  if (ctx.decision.action !== 'CLARIFY') return null;
+  if (!containsExplicitReplacementSignal(ctx.factText)) return null;
+  const targetId = ctx.decision.targetMemoryId;
+  const targetInCandidates = targetId !== null && targetId !== undefined
+    && ctx.candidates.some((candidate) => candidate.id === targetId);
+  return targetInCandidates ? supersede(ctx.decision) : ctx.decision;
+}
+
+function preserveLowConfidenceClarify(ctx: PolicyContext): AUDNDecision | null {
+  if (!shouldClarifyConflict(ctx.decision)) return null;
+  if (containsExplicitReplacementSignal(ctx.factText)) return null;
+  return ctx.decision;
+}
+
+function detectUncertainConflict(ctx: PolicyContext): AUDNDecision | null {
+  if (!isUncertainConflict(ctx.factText, ctx.candidates)) return null;
+  return clarify(ctx.decision, 'Uncertain contradiction detected in new fact');
+}
+
+/**
+ * If the new fact contradicts a high-importance memory, require clarification
+ * unless an explicit replacement signal is present (and the action is
+ * already destructive). Otherwise promote to ADD so a non-contradictory
+ * specialization doesn't overwrite the original.
+ */
+function resolveCriticalConflict(ctx: PolicyContext): AUDNDecision | null {
+  if (!isCriticalConflict(ctx.decision, ctx.factText, ctx.candidates)) return null;
+  const target = resolveDecisionTarget(ctx.decision, ctx.candidates);
+  if (target && containsContradictionSignal(ctx.factText, target.content)) {
+    if (canApplyExplicitReplacement(ctx.decision, ctx.factText)) {
+      return ctx.decision.action === 'UPDATE' ? supersede(ctx.decision) : ctx.decision;
+    }
+    return clarify(ctx.decision, 'Critical existing memory requires clarification before replacement');
+  }
+  return promoteToAdd(ctx.decision);
+}
+
+function preserveRecommendationAttribution(ctx: PolicyContext): AUDNDecision | null {
+  if (!shouldPreserveRecommendationAttribution(ctx.decision, ctx.factText, ctx.candidates)) return null;
+  return promoteToAdd(ctx.decision);
+}
+
+function separateStateTransition(ctx: PolicyContext): AUDNDecision | null {
+  if (!shouldSeparateStateTransition(ctx.decision, ctx.factText)) return null;
+  return promoteToAdd(ctx.decision);
+}
+
+function supersedeInsteadOfUpdate(ctx: PolicyContext): AUDNDecision | null {
+  if (!shouldSupersedeInsteadOfUpdate(ctx.decision, ctx.factText, ctx.candidates)) return null;
+  return supersede(ctx.decision);
 }
 
 export function extractConflictKeywords(text: string): string[] {
@@ -98,7 +170,9 @@ function shouldClarifyConflict(decision: AUDNDecision): boolean {
 
 function isUncertainConflict(factText: string, candidates: CandidateMemory[]): boolean {
   if (candidates.length === 0) return false;
-  return UNCERTAIN_MARKERS.some((marker) => factText.toLowerCase().includes(marker));
+  const lower = factText.toLowerCase();
+  return UNCERTAIN_MARKERS.some((marker) => lower.includes(marker))
+    || UNCERTAIN_PATTERNS.some((pattern) => pattern.test(factText));
 }
 
 function isCriticalConflict(
@@ -152,10 +226,24 @@ function shouldSupersedeInsteadOfUpdate(
 }
 
 const SWITCH_MARKERS = ['switched', 'changed', 'moved to', 'replaced', 'replacing', 'no longer', 'instead of', 'now using', 'now use', 'corrected from', 'correction:', 'correction '];
+const EXPLICIT_REPLACEMENT_PATTERNS = [
+  /\breplac(?:e|ed|ing)\b/i,
+  /\bno longer\b/i,
+  /\binstead of\b/i,
+  /\bcorrect(?:ed|ion)\b/i,
+];
+
+function containsExplicitReplacementSignal(factText: string): boolean {
+  return EXPLICIT_REPLACEMENT_PATTERNS.some((pattern) => pattern.test(factText));
+}
+
+function canApplyExplicitReplacement(decision: AUDNDecision, factText: string): boolean {
+  if (decision.action !== 'SUPERSEDE' && decision.action !== 'UPDATE') return false;
+  return containsExplicitReplacementSignal(factText);
+}
 
 function containsContradictionSignal(factText: string, candidateText: string): boolean {
-  const lower = factText.toLowerCase();
-  if (SWITCH_MARKERS.some((m) => lower.includes(m))) return true;
+  if (containsExplicitReplacementSignal(factText)) return true;
   const candidateKeywords = extractConflictKeywords(candidateText);
   const negationPattern = candidateKeywords.some((kw) => {
     const negated = new RegExp(`(not|no longer|stopped|quit|don'?t)\\s+\\w*\\s*${kw}`, 'i');

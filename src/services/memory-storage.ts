@@ -23,6 +23,12 @@ import type {
   Outcome,
 } from './memory-service-types.js';
 
+interface StoreProjectionOptions {
+  cmoId?: string;
+  logicalTimestamp?: Date;
+  workspace?: import('../db/repository-types.js').WorkspaceContext;
+}
+
 /** Store a new canonical fact: CMO, projection, claim, evidence, entities. */
 export async function storeCanonicalFact(
   deps: MemoryServiceDeps,
@@ -40,7 +46,11 @@ export async function storeCanonicalFact(
     logicalTimestamp,
     claimSlot: claimSlot ?? null,
     createProjection: async (cmoId) =>
-      storeProjection(deps, userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore, cmoId, workspace),
+      storeProjection(deps, userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore, {
+        cmoId,
+        logicalTimestamp,
+        workspace,
+      }),
   });
   if (!lineage?.memoryId) return { outcome: 'skipped', memoryId: null };
   const memoryId = lineage.memoryId;
@@ -71,8 +81,7 @@ export async function storeProjection(
   sourceUrl: string,
   episodeId: string,
   trustScore: number,
-  cmoId?: string,
-  workspace?: import('../db/repository-types.js').WorkspaceContext,
+  options: StoreProjectionOptions = {},
 ): Promise<string | null> {
   const namespace = deps.config.namespaceClassificationEnabled
     ? await classifyNamespace(fact.fact, sourceSite, fact.keywords)
@@ -84,16 +93,18 @@ export async function storeProjection(
     userId, content: fact.fact, embedding,
     memoryType: fact.type === 'knowledge' ? 'semantic' : 'episodic',
     importance: fact.importance, sourceSite, sourceUrl, episodeId,
-    metadata: cmoId ? { cmo_id: cmoId } : undefined,
+    metadata: options.cmoId ? { cmo_id: options.cmoId } : undefined,
     keywords: fact.keywords.join(' '),
     namespace: namespace ?? undefined,
     summary: fact.headline,
     overview: overview !== fact.fact ? overview : '',
     trustScore, network,
     opinionConfidence: fact.opinionConfidence ?? null,
-    workspaceId: workspace?.workspaceId,
-    agentId: workspace?.agentId,
-    visibility: workspace?.visibility,
+    workspaceId: options.workspace?.workspaceId,
+    agentId: options.workspace?.agentId,
+    visibility: options.workspace?.visibility,
+    createdAt: options.logicalTimestamp,
+    observedAt: options.logicalTimestamp,
   });
 
   const atomicFact = buildAtomicFactProjection(fact, embedding);
@@ -103,7 +114,7 @@ export async function storeProjection(
     factType: atomicFact.factType, importance: atomicFact.importance,
     sourceSite, sourceUrl, episodeId,
     keywords: atomicFact.keywords.join(' '), metadata: atomicFact.metadata,
-    workspaceId: workspace?.workspaceId, agentId: workspace?.agentId,
+    workspaceId: options.workspace?.workspaceId, agentId: options.workspace?.agentId,
   }]);
 
   const foresight = buildForesightProjections(fact, embedding);
@@ -113,7 +124,7 @@ export async function storeProjection(
       content: entry.content, embedding: entry.embedding, foresightType: entry.foresightType,
       sourceSite, sourceUrl, episodeId,
       metadata: entry.metadata, validFrom: entry.validFrom, validTo: entry.validTo,
-      workspaceId: workspace?.workspaceId, agentId: workspace?.agentId,
+      workspaceId: options.workspace?.workspaceId, agentId: options.workspace?.agentId,
     })));
   }
 

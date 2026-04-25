@@ -71,6 +71,7 @@ export interface RuntimeConfig {
   extractionCacheDir: string;
   embeddingCacheEnabled: boolean;
   chunkedExtractionEnabled: boolean;
+  chunkedExtractionFallbackEnabled: boolean;
   chunkSizeTurns: number;
   chunkOverlapTurns: number;
   consensusExtractionEnabled: boolean;
@@ -308,6 +309,7 @@ export const config: RuntimeConfig = {
   extractionCacheDir: optionalEnv('EXTRACTION_CACHE_DIR') ?? './.eval-cache',
   embeddingCacheEnabled: (optionalEnv('EMBEDDING_CACHE_ENABLED') ?? 'false') === 'true',
   chunkedExtractionEnabled: (optionalEnv('CHUNKED_EXTRACTION_ENABLED') ?? 'false') === 'true',
+  chunkedExtractionFallbackEnabled: (optionalEnv('CHUNKED_EXTRACTION_FALLBACK_ENABLED') ?? 'false') === 'true',
   chunkSizeTurns: parseInt(optionalEnv('CHUNK_SIZE_TURNS') ?? '4', 10),
   chunkOverlapTurns: parseInt(optionalEnv('CHUNK_OVERLAP_TURNS') ?? '1', 10),
   consensusExtractionEnabled: (optionalEnv('CONSENSUS_EXTRACTION_ENABLED') ?? 'false') === 'true',
@@ -461,7 +463,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'stagedLoadingEnabled', 'retrievalTraceEnabled',
   // Extraction internals
   'extractionCacheEnabled', 'embeddingCacheEnabled',
-  'chunkedExtractionEnabled', 'chunkSizeTurns', 'chunkOverlapTurns',
+  'chunkedExtractionEnabled', 'chunkedExtractionFallbackEnabled',
+  'chunkSizeTurns', 'chunkOverlapTurns',
   'consensusExtractionEnabled', 'consensusExtractionRuns',
   'observationDateExtractionEnabled', 'quotedEntityExtractionEnabled',
   'entropyGateEnabled', 'entropyGateThreshold', 'entropyGateAlpha',

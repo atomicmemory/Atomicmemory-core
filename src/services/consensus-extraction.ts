@@ -29,6 +29,10 @@ export interface ConsensusExtractionConfig {
   consensusExtractionEnabled: boolean;
   consensusExtractionRuns: number;
   chunkedExtractionEnabled: boolean;
+  chunkedExtractionFallbackEnabled: boolean;
+  chunkSizeTurns: number;
+  chunkOverlapTurns: number;
+  extractionCacheEnabled: boolean;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
 }
@@ -53,9 +57,7 @@ export async function consensusExtractFacts(
 ): Promise<ExtractedFact[]> {
   if (!config.consensusExtractionEnabled) {
     const options = buildExtractionOptions(config);
-    const facts = await (config.chunkedExtractionEnabled
-      ? chunkedExtractFacts(conversationText, options)
-      : cachedExtractFacts(conversationText, options));
+    const facts = await extractOnce(conversationText, options, config);
     return applyOptionalQuotedEntityExtraction(facts, conversationText, config);
   }
 
@@ -100,6 +102,59 @@ function buildExtractionOptions(
   return {
     observationDateExtractionEnabled: config.observationDateExtractionEnabled,
   };
+}
+
+function buildChunkingConfig(
+  config: Pick<ConsensusExtractionConfig, 'chunkSizeTurns' | 'chunkOverlapTurns' | 'extractionCacheEnabled'>,
+) {
+  return {
+    chunkSizeTurns: config.chunkSizeTurns,
+    chunkOverlapTurns: config.chunkOverlapTurns,
+    extractionCacheEnabled: config.extractionCacheEnabled,
+  };
+}
+
+async function extractOnce(
+  conversationText: string,
+  options: ReturnType<typeof buildExtractionOptions>,
+  config: Pick<ConsensusExtractionConfig,
+    | 'chunkedExtractionEnabled'
+    | 'chunkedExtractionFallbackEnabled'
+    | 'chunkSizeTurns'
+    | 'chunkOverlapTurns'
+    | 'extractionCacheEnabled'
+  >,
+): Promise<ExtractedFact[]> {
+  if (config.chunkedExtractionEnabled) {
+    return chunkedExtractFacts(conversationText, options, buildChunkingConfig(config));
+  }
+
+  // Branch on the per-request runtime config rather than the singleton.
+  // cachedExtractFacts internally checks the singleton; if a benchmark sets
+  // config_override.extractionCacheEnabled=false but the singleton is true,
+  // routing through cachedExtractFacts would silently cache anyway.
+  const facts = config.extractionCacheEnabled
+    ? await cachedExtractFacts(conversationText, options)
+    : await extractFacts(conversationText, options);
+  if (!shouldUseChunkedFallback(conversationText, facts, config)) return facts;
+  return chunkedExtractFacts(conversationText, options, buildChunkingConfig(config));
+}
+
+function shouldUseChunkedFallback(
+  conversationText: string,
+  facts: ExtractedFact[],
+  config: Pick<ConsensusExtractionConfig, 'chunkedExtractionFallbackEnabled' | 'chunkSizeTurns'>,
+): boolean {
+  return config.chunkedExtractionFallbackEnabled
+    && facts.length === 0
+    && countConversationTurns(conversationText) > config.chunkSizeTurns;
+}
+
+function countConversationTurns(conversationText: string): number {
+  return conversationText
+    .split('\n')
+    .filter((line) => /^\w[\w\s]*:/.test(line.trim()))
+    .length;
 }
 
 /** Keep only facts from run[0] that appear in a majority of all runs. */

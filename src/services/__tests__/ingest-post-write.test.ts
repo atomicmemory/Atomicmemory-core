@@ -90,13 +90,18 @@ describe('runPostWriteProcessors', () => {
       importance: 0.5, keywords: ['k'], memberMemoryIds: ['m1', 'm2'],
     }]);
     const deps = makeDeps();
+    const ts = new Date('2026-04-17T00:00:00Z');
     const result = await runPostWriteProcessors(deps, 'u1', {
       episodeId: 'ep1', sourceSite: 's', sourceUrl: '', storedFacts,
       memoryIds: ['m1', 'm2'], embeddingCache: cache,
-      compositesEnabled: true, timingPrefix: 'test',
+      sessionTimestamp: ts, compositesEnabled: true, timingPrefix: 'test',
     });
     expect(result.compositesCreated).toBe(1);
     expect(deps.repo.storeMemory).toHaveBeenCalledTimes(1);
+    expect(deps.repo.storeMemory).toHaveBeenCalledWith(expect.objectContaining({
+      createdAt: ts,
+      observedAt: ts,
+    }));
   });
 
   it('skips composites when compositesEnabled is false even with storedFacts', async () => {

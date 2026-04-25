@@ -30,7 +30,7 @@ import {
   searchSimilar,
   searchSimilarInWorkspace,
 } from './repository-read.js';
-import type { AgentScope, CanonicalMemoryObjectLineage } from './repository-types.js';
+import type { AgentScope, CanonicalMemoryObjectLineage, StoreMemoryInput } from './repository-types.js';
 import {
   backdateMemories,
   deleteAll,
@@ -82,32 +82,6 @@ export type {
   SearchResult,
   WorkspaceContext,
 } from './repository-types.js';
-
-/** Shared input shape for storeMemory and storeMemoryWithClient. */
-interface StoreMemoryInput {
-  userId: string;
-  content: string;
-  embedding: number[];
-  memoryType?: string;
-  importance: number;
-  sourceSite: string;
-  sourceUrl?: string;
-  episodeId?: string;
-  status?: 'active' | 'needs_clarification';
-  metadata?: Record<string, unknown>;
-  keywords?: string;
-  namespace?: string;
-  summary?: string;
-  overview?: string;
-  trustScore?: number;
-  createdAt?: Date;
-  network?: string;
-  opinionConfidence?: number | null;
-  observationSubject?: string | null;
-  workspaceId?: string;
-  agentId?: string;
-  visibility?: 'agent_only' | 'restricted' | 'workspace';
-}
 
 export class MemoryRepository {
   constructor(private pool: pg.Pool) {}

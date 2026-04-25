@@ -280,4 +280,38 @@ describe('memory-ingest runtime config seam', () => {
     ]);
     expect(result.compositesCreated).toBe(0);
   });
+
+  it('threads transcript session date into canonical fact storage', async () => {
+    const deps = {
+      config: {
+        audnCandidateThreshold: 0.42,
+        auditLoggingEnabled: false,
+        compositeGroupingEnabled: false,
+        entityGraphEnabled: false,
+        entropyGateEnabled: false,
+        fastAudnEnabled: false,
+        fastAudnDuplicateThreshold: 0.83,
+        lessonsEnabled: false,
+        linkExpansionEnabled: false,
+      },
+      repo: { storeEpisode: vi.fn().mockResolvedValue('episode-1'), backdateMemories: vi.fn() },
+      claims: {},
+      entities: null,
+      lessons: null,
+      observationService: null,
+      uriResolver: {},
+    } as any;
+
+    await performIngest(
+      withStores(deps) as any,
+      'user-1',
+      '[Session date: 2023-08-15T16:20:00.000Z]\nUser: I prefer Rust',
+      'chat',
+    );
+
+    expect(mockStoreCanonicalFact).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ logicalTimestamp: new Date('2023-08-15T16:20:00.000Z') }),
+    );
+  });
 });
