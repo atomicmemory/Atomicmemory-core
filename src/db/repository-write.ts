@@ -10,6 +10,7 @@ import {
   type CanonicalMemoryObjectLineage,
   type CanonicalMemoryObjectProvenance,
   type MemoryMetadata,
+  type StoreMemoryInput,
   clampImportance,
 } from './repository-types.js';
 
@@ -50,31 +51,7 @@ export async function storeEpisodeWithClient(
   return result.rows[0].id;
 }
 
-export interface StoreMemoryInput {
-  userId: string;
-  content: string;
-  embedding: number[];
-  memoryType?: string;
-  importance: number;
-  sourceSite: string;
-  sourceUrl?: string;
-  episodeId?: string;
-  status?: 'active' | 'needs_clarification';
-  metadata?: MemoryMetadata;
-  keywords?: string;
-  namespace?: string;
-  summary?: string;
-  overview?: string;
-  trustScore?: number;
-  createdAt?: Date;
-  observedAt?: Date;
-  network?: string;
-  opinionConfidence?: number | null;
-  observationSubject?: string | null;
-  workspaceId?: string;
-  agentId?: string;
-  visibility?: 'agent_only' | 'restricted' | 'workspace';
-}
+export type { StoreMemoryInput };
 
 export interface StoreCanonicalMemoryObjectInput {
   userId: string;

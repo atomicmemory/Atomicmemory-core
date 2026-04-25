@@ -19,39 +19,15 @@ import type {
   MemoryRow,
   SearchResult,
   EpisodeRow,
+  StoreMemoryInput,
 } from './repository-types.js';
 import type { CandidateRow } from './repository-vector-search.js';
 import type { StoreAtomicFactInput, StoreForesightInput } from './repository-representations.js';
 import type { MemoryLink } from './repository-links.js';
 
-// ---------------------------------------------------------------------------
-// StoreMemoryInput — shared write shape
-// ---------------------------------------------------------------------------
-
-export interface StoreMemoryInput {
-  userId: string;
-  content: string;
-  embedding: number[];
-  memoryType?: string;
-  importance: number;
-  sourceSite: string;
-  sourceUrl?: string;
-  episodeId?: string;
-  status?: 'active' | 'needs_clarification';
-  metadata?: Record<string, unknown>;
-  keywords?: string;
-  namespace?: string;
-  summary?: string;
-  overview?: string;
-  trustScore?: number;
-  createdAt?: Date;
-  network?: string;
-  opinionConfidence?: number | null;
-  observationSubject?: string | null;
-  workspaceId?: string;
-  agentId?: string;
-  visibility?: 'agent_only' | 'restricted' | 'workspace';
-}
+// StoreMemoryInput is shared with the repository write path; re-exported
+// here so existing consumers of `./stores.js` keep working.
+export type { StoreMemoryInput };
 
 // ---------------------------------------------------------------------------
 // MemoryStore — memory CRUD + workspace variants

@@ -49,33 +49,7 @@ import {
   ConflictIdParamSchema,
   ResolveConflictBodySchema,
 } from './agents';
-import {
-  IngestResponseSchema,
-  SearchResponseSchema,
-  ExpandResponseSchema,
-  ListResponseSchema,
-  GetMemoryResponseSchema,
-  StatsResponseSchema,
-  HealthResponseSchema,
-  ConfigUpdateResponseSchema,
-  ConsolidateResponseSchema,
-  DecayResponseSchema,
-  CapResponseSchema,
-  LessonsListResponseSchema,
-  LessonStatsResponseSchema,
-  LessonReportResponseSchema,
-  ReconciliationResponseSchema,
-  ReconcileStatusResponseSchema,
-  ResetSourceResponseSchema,
-  SuccessResponseSchema,
-  MutationSummaryResponseSchema,
-  AuditRecentResponseSchema,
-  AuditTrailResponseSchema,
-  TrustResponseSchema,
-  ConflictsListResponseSchema,
-  ResolveConflictResponseSchema,
-  AutoResolveConflictsResponseSchema,
-} from './responses';
+import * as R from './responses';
 
 export const API_TITLE = 'AtomicMemory HTTP API';
 export const API_VERSION = '1.0.0';
@@ -144,7 +118,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Ingest a conversation transcript with full extraction.',
     request: { body: { content: { 'application/json': { schema: IngestBodySchema } }, required: true } },
     responses: {
-      200: ok('Ingest result with extracted facts.', IngestResponseSchema),
+      200: ok('Ingest result with extracted facts.', R.IngestResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -158,7 +132,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Quick ingest (storeVerbatim when skip_extraction=true).',
     request: { body: { content: { 'application/json': { schema: IngestBodySchema } }, required: true } },
     responses: {
-      200: ok('Ingest result.', IngestResponseSchema),
+      200: ok('Ingest result.', R.IngestResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -172,7 +146,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Full semantic search with optional temporal / retrieval-mode / token-budget controls.',
     request: { body: { content: { 'application/json': { schema: SearchBodySchema } }, required: true } },
     responses: {
-      200: ok('Search results with injection_text and citations.', SearchResponseSchema),
+      200: ok('Search results with injection_text and citations.', R.SearchResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -186,7 +160,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Latency-optimized search (skips LLM repair loop). ~88% lower latency than /search.',
     request: { body: { content: { 'application/json': { schema: SearchBodySchema } }, required: true } },
     responses: {
-      200: ok('Search results.', SearchResponseSchema),
+      200: ok('Search results.', R.SearchResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -200,7 +174,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Expand a list of memory IDs into full objects.',
     request: { body: { content: { 'application/json': { schema: ExpandBodySchema } }, required: true } },
     responses: {
-      200: ok('Expanded memories array.', ExpandResponseSchema),
+      200: ok('Expanded memories array.', R.ExpandResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -214,7 +188,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'List memories for a user (or workspace).',
     request: { query: ListQuerySchema },
     responses: {
-      200: ok('Paginated memory list.', ListResponseSchema),
+      200: ok('Paginated memory list.', R.ListResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -228,7 +202,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Fetch a single memory by UUID.',
     request: { params: UuidIdParamSchema, query: MemoryByIdQuerySchema },
     responses: {
-      200: ok('Memory object.', GetMemoryResponseSchema),
+      200: ok('Memory object.', R.GetMemoryResponseSchema),
       400: RESPONSE_400,
       404: RESPONSE_404,
       500: RESPONSE_500,
@@ -243,7 +217,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Delete a single memory by UUID.',
     request: { params: UuidIdParamSchema, query: MemoryByIdQuerySchema },
     responses: {
-      200: ok('Deletion success.', SuccessResponseSchema),
+      200: ok('Deletion success.', R.SuccessResponseSchema),
       400: RESPONSE_400,
       404: RESPONSE_404,
       500: RESPONSE_500,
@@ -258,7 +232,7 @@ function registerMemoryCoreRoutes(registry: OpenAPIRegistry): void {
     summary: 'Aggregate memory statistics for a user.',
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Stats payload.', StatsResponseSchema),
+      200: ok('Stats payload.', R.StatsResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -278,7 +252,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: 'Compute consolidation candidates; optionally execute (execute=true).',
     request: { body: { content: { 'application/json': { schema: ConsolidateBodySchema } }, required: true } },
     responses: {
-      200: ok('Consolidation result.', ConsolidateResponseSchema),
+      200: ok('Consolidation result.', R.ConsolidateResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -292,7 +266,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: 'Evaluate decay candidates. dry_run=false archives them.',
     request: { body: { content: { 'application/json': { schema: DecayBodySchema } }, required: true } },
     responses: {
-      200: ok('Decay evaluation + archived count.', DecayResponseSchema),
+      200: ok('Decay evaluation + archived count.', R.DecayResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -306,7 +280,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: "Memory-cap status for a user's store.",
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Cap status.', CapResponseSchema),
+      200: ok('Cap status.', R.CapResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -320,7 +294,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: 'Reconcile deferred mutations for a user (or all users when user_id is absent).',
     request: { body: { content: { 'application/json': { schema: ReconcileBodySchema } }, required: false } },
     responses: {
-      200: ok('Reconciliation result.', ReconciliationResponseSchema),
+      200: ok('Reconciliation result.', R.ReconciliationResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -334,7 +308,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: 'Get deferred-mutation reconciliation status.',
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Status payload.', ReconcileStatusResponseSchema),
+      200: ok('Status payload.', R.ReconcileStatusResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -348,7 +322,7 @@ function registerMemoryLifecycleRoutes(registry: OpenAPIRegistry): void {
     summary: 'Delete all memories for a given user + source_site.',
     request: { body: { content: { 'application/json': { schema: ResetSourceBodySchema } }, required: true } },
     responses: {
-      200: ok('Reset result.', ResetSourceResponseSchema),
+      200: ok('Reset result.', R.ResetSourceResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -368,7 +342,7 @@ function registerMemoryAuditRoutes(registry: OpenAPIRegistry): void {
     summary: "Aggregate mutation statistics for a user's memory store.",
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Mutation summary.', MutationSummaryResponseSchema),
+      200: ok('Mutation summary.', R.MutationSummaryResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -382,7 +356,7 @@ function registerMemoryAuditRoutes(registry: OpenAPIRegistry): void {
     summary: 'Recent mutations for a user, limit-bounded.',
     request: { query: UserIdLimitQuerySchema },
     responses: {
-      200: ok('Recent mutations.', AuditRecentResponseSchema),
+      200: ok('Recent mutations.', R.AuditRecentResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -396,7 +370,7 @@ function registerMemoryAuditRoutes(registry: OpenAPIRegistry): void {
     summary: 'Per-memory version history.',
     request: { params: UuidIdParamSchema, query: UserIdQuerySchema },
     responses: {
-      200: ok('Audit trail.', AuditTrailResponseSchema),
+      200: ok('Audit trail.', R.AuditTrailResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -416,7 +390,7 @@ function registerMemoryLessonRoutes(registry: OpenAPIRegistry): void {
     summary: 'List active lessons for a user.',
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Lessons list.', LessonsListResponseSchema),
+      200: ok('Lessons list.', R.LessonsListResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -430,7 +404,7 @@ function registerMemoryLessonRoutes(registry: OpenAPIRegistry): void {
     summary: 'Lesson statistics for a user.',
     request: { query: UserIdQuerySchema },
     responses: {
-      200: ok('Stats.', LessonStatsResponseSchema),
+      200: ok('Stats.', R.LessonStatsResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -444,7 +418,7 @@ function registerMemoryLessonRoutes(registry: OpenAPIRegistry): void {
     summary: 'Report a new lesson.',
     request: { body: { content: { 'application/json': { schema: LessonReportBodySchema } }, required: true } },
     responses: {
-      200: ok('Lesson id.', LessonReportResponseSchema),
+      200: ok('Lesson id.', R.LessonReportResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -458,7 +432,7 @@ function registerMemoryLessonRoutes(registry: OpenAPIRegistry): void {
     summary: 'Deactivate a lesson by id.',
     request: { params: FreeIdParamSchema, query: UserIdQuerySchema },
     responses: {
-      200: ok('Success.', SuccessResponseSchema),
+      200: ok('Success.', R.SuccessResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -477,7 +451,7 @@ function registerMemoryConfigRoutes(registry: OpenAPIRegistry): void {
     tags: [TAG_CONFIG],
     summary: 'Subsystem liveness + current runtime config snapshot.',
     responses: {
-      200: ok('Status + config snapshot.', HealthResponseSchema),
+      200: ok('Status + config snapshot.', R.HealthResponseSchema),
     },
   });
 
@@ -491,7 +465,7 @@ function registerMemoryConfigRoutes(registry: OpenAPIRegistry): void {
       'Set CORE_RUNTIME_CONFIG_MUTATION_ENABLED=true to enable. Startup-only fields (embedding_provider/model, llm_provider/model) return 400 with a `rejected` array listing the offending fields.',
     request: { body: { content: { 'application/json': { schema: ConfigBodySchema } }, required: true } },
     responses: {
-      200: ok('Applied changes + config snapshot.', ConfigUpdateResponseSchema),
+      200: ok('Applied changes + config snapshot.', R.ConfigUpdateResponseSchema),
       400: {
         // Two shapes are possible:
         //   1. Basic `{ error }` when the validateBody middleware
@@ -532,7 +506,7 @@ function registerAgentRoutes(registry: OpenAPIRegistry): void {
     summary: "Set the calling user's trust level for a given agent.",
     request: { body: { content: { 'application/json': { schema: SetTrustBodySchema } }, required: true } },
     responses: {
-      200: ok('Agent id + applied trust level.', TrustResponseSchema),
+      200: ok('Agent id + applied trust level.', R.TrustResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -546,7 +520,7 @@ function registerAgentRoutes(registry: OpenAPIRegistry): void {
     summary: 'Look up the trust level for a (user, agent) pair.',
     request: { query: GetTrustQuerySchema },
     responses: {
-      200: ok('Agent id + trust level.', TrustResponseSchema),
+      200: ok('Agent id + trust level.', R.TrustResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -560,7 +534,7 @@ function registerAgentRoutes(registry: OpenAPIRegistry): void {
     summary: 'List open agent conflicts for a user.',
     request: { query: UserIdFromQuerySchema },
     responses: {
-      200: ok('Conflicts list.', ConflictsListResponseSchema),
+      200: ok('Conflicts list.', R.ConflictsListResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -577,7 +551,7 @@ function registerAgentRoutes(registry: OpenAPIRegistry): void {
       body: { content: { 'application/json': { schema: ResolveConflictBodySchema } }, required: true },
     },
     responses: {
-      200: ok('Resolution confirmation.', ResolveConflictResponseSchema),
+      200: ok('Resolution confirmation.', R.ResolveConflictResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },
@@ -591,7 +565,7 @@ function registerAgentRoutes(registry: OpenAPIRegistry): void {
     summary: 'Auto-resolve all expired conflicts for a user.',
     request: { body: { content: { 'application/json': { schema: UserIdFromBodySchema } }, required: true } },
     responses: {
-      200: ok('Count of resolved conflicts.', AutoResolveConflictsResponseSchema),
+      200: ok('Count of resolved conflicts.', R.AutoResolveConflictsResponseSchema),
       400: RESPONSE_400,
       500: RESPONSE_500,
     },

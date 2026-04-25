@@ -46,6 +46,14 @@ describe('POST /memories/* — per-request config_override', () => {
   const ingest = vi.fn();
   const quickIngest = vi.fn();
 
+  /** POST a JSON body to a route on the booted ephemeral app. */
+  const postJson = (path: string, body: unknown): Promise<Response> =>
+    fetch(`${booted.baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
   beforeAll(async () => {
     scopedSearch.mockResolvedValue({
       memories: [], injectionText: '', citations: [], retrievalMode: 'flat',
@@ -89,10 +97,7 @@ describe('POST /memories/* — per-request config_override', () => {
   afterAll(async () => { await booted.close(); });
 
   it('POST /search with no override → no headers, effectiveConfig undefined', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: 'u', query: 'q' }),
-    });
+    const res = await postJson(`/memories/search`, { user_id: 'u', query: 'q' });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBeNull();
     expect(res.headers.get('X-Atomicmem-Effective-Config-Hash')).toBeNull();
@@ -104,13 +109,10 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('POST /search with override → three headers + effectiveConfig threaded', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search`, {
         user_id: 'u', query: 'q',
         config_override: { hybridSearchEnabled: true, mmrLambda: 0.8 },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Effective-Config-Hash')).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -122,13 +124,10 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('POST /search/fast with override → headers and fast:true both set', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/search/fast`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search/fast`, {
         user_id: 'u', query: 'q',
         config_override: { crossEncoderEnabled: true },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     const call = scopedSearch.mock.calls[0]!;
@@ -138,13 +137,10 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('POST /ingest with override → headers + trailing effectiveConfig arg', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/ingest`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/ingest`, {
         user_id: 'u', conversation: 'hi', source_site: 's',
         config_override: { chunkedExtractionEnabled: true },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('chunkedExtractionEnabled');
@@ -154,13 +150,10 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('POST /ingest/quick with override → headers + trailing effectiveConfig arg', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/ingest/quick`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/ingest/quick`, {
         user_id: 'u', conversation: 'hi', source_site: 's',
         config_override: { entropyGateEnabled: false, fastAudnEnabled: true },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('entropyGateEnabled,fastAudnEnabled');
     const call = quickIngest.mock.calls[0]!;
@@ -171,13 +164,10 @@ describe('POST /memories/* — per-request config_override', () => {
 
   it('unknown override key → 200, service invoked, warning header set', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search`, {
         user_id: 'u', query: 'q',
         config_override: { bogusFlag: true, alsoBogus: 'nope' },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBe('alsoBogus,bogusFlag');
@@ -188,13 +178,10 @@ describe('POST /memories/* — per-request config_override', () => {
 
   it('mix of known and unknown keys → only unknown ones in warning header', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search`, {
         user_id: 'u', query: 'q',
         config_override: { hybridSearchEnabled: true, futureFieldX: 42 },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('futureFieldX,hybridSearchEnabled');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBe('futureFieldX');
@@ -202,13 +189,10 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('all-known keys → no X-Atomicmem-Unknown-Override-Keys header', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search`, {
         user_id: 'u', query: 'q',
         config_override: { hybridSearchEnabled: true },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBeNull();
@@ -217,13 +201,10 @@ describe('POST /memories/* — per-request config_override', () => {
   it('override raises maxSearchResults → request limit clamped to override, not startup cap', async () => {
     // Startup cap is 20 (ROUTE_CONFIG.maxSearchResults). Override raises to 50,
     // request asks for 40 — must reach the service as 40, not clamped to 20.
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await postJson(`/memories/search`, {
         user_id: 'u', query: 'q', limit: 40,
         config_override: { maxSearchResults: 50 },
-      }),
-    });
+      });
     expect(res.status).toBe(200);
     const call = scopedSearch.mock.calls[0]!;
     const options = call[2] as { limit?: number };
@@ -231,10 +212,7 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('empty override object → treated as no override (no headers)', async () => {
-    const res = await fetch(`${booted.baseUrl}/memories/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: 'u', query: 'q', config_override: {} }),
-    });
+    const res = await postJson(`/memories/search`, { user_id: 'u', query: 'q', config_override: {} });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBeNull();
     const call = scopedSearch.mock.calls[0]!;

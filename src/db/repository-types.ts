@@ -9,6 +9,36 @@ export interface MemoryMetadata {
   [key: string]: unknown;
 }
 
+/**
+ * Shared write-shape for memory rows. Used by the repository write path
+ * and the MemoryStore interface so the two stay in lockstep.
+ */
+export interface StoreMemoryInput {
+  userId: string;
+  content: string;
+  embedding: number[];
+  memoryType?: string;
+  importance: number;
+  sourceSite: string;
+  sourceUrl?: string;
+  episodeId?: string;
+  status?: 'active' | 'needs_clarification';
+  metadata?: MemoryMetadata;
+  keywords?: string;
+  namespace?: string;
+  summary?: string;
+  overview?: string;
+  trustScore?: number;
+  createdAt?: Date;
+  observedAt?: Date;
+  network?: string;
+  opinionConfidence?: number | null;
+  observationSubject?: string | null;
+  workspaceId?: string;
+  agentId?: string;
+  visibility?: 'agent_only' | 'restricted' | 'workspace';
+}
+
 export type CanonicalMemoryObjectFamily = 'ingested_fact';
 
 export interface CanonicalFactPayload {
