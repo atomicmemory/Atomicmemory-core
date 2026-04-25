@@ -12,7 +12,11 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { config, updateRuntimeConfig, type EmbeddingProviderName, type LLMProviderName, type RuntimeConfig } from '../config.js';
+import { config, updateRuntimeConfig, type RuntimeConfig } from '../config.js';
+import {
+  readRuntimeConfigRouteSnapshot as projectRuntimeConfigRouteSnapshot,
+  type RuntimeConfigRouteSnapshot,
+} from '../app/runtime-config-route-snapshot.js';
 import { MemoryService, type RetrievalResult } from '../services/memory-service.js';
 import type { MemoryScope, MemoryServiceDeps, RetrievalObservability } from '../services/memory-service-types.js';
 import {
@@ -72,28 +76,29 @@ interface RuntimeConfigRouteAdapter {
   update(updates: RuntimeConfigRouteUpdates): string[];
 }
 
-interface RuntimeConfigRouteSnapshot {
-  retrievalProfile: string;
-  embeddingProvider: EmbeddingProviderName;
-  embeddingModel: string;
-  llmProvider: LLMProviderName;
-  llmModel: string;
-  clarificationConflictThreshold: number;
-  maxSearchResults: number;
-  hybridSearchEnabled: boolean;
-  iterativeRetrievalEnabled: boolean;
-  entityGraphEnabled: boolean;
-  crossEncoderEnabled: boolean;
-  agenticRetrievalEnabled: boolean;
-  repairLoopEnabled: boolean;
-  runtimeConfigMutationEnabled: boolean;
-}
-
 interface RuntimeConfigRouteUpdates {
   similarityThreshold?: number;
   audnCandidateThreshold?: number;
   clarificationConflictThreshold?: number;
   maxSearchResults?: number;
+}
+
+interface IngestRequestContext {
+  body: IngestBody;
+  effectiveConfig: MemoryServiceDeps['config'] | undefined;
+}
+
+interface SearchRequestContext {
+  body: SearchBody;
+  effectiveConfig: MemoryServiceDeps['config'] | undefined;
+  scope: MemoryScope;
+  requestLimit: number | undefined;
+}
+
+interface MemoryByIdRouteQuery {
+  userId: string;
+  workspaceId: string | undefined;
+  agentId: string | undefined;
 }
 
 const STARTUP_ONLY_CONFIG_FIELDS = ['embedding_provider', 'embedding_model', 'llm_provider', 'llm_model'] as const;
@@ -153,12 +158,7 @@ function registerCors(router: Router): void {
 function registerIngestRoute(router: Router, service: MemoryService): void {
   router.post('/ingest', validateBody(IngestBodySchema), async (req: Request, res: Response) => {
     try {
-      const body = req.body as IngestBody;
-      const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
-      const result = body.workspace
-        ? await service.workspaceIngest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, body.workspace, undefined, effectiveConfig)
-        : await service.ingest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, undefined, effectiveConfig);
-      res.json(formatIngestResponse(result));
+      await handleIngestRequest(service, req, res, 'full');
     } catch (err) {
       handleRouteError(res, 'POST /v1/memories/ingest', err);
     }
@@ -168,18 +168,40 @@ function registerIngestRoute(router: Router, service: MemoryService): void {
 function registerQuickIngestRoute(router: Router, service: MemoryService): void {
   router.post('/ingest/quick', validateBody(IngestBodySchema), async (req: Request, res: Response) => {
     try {
-      const body = req.body as IngestBody;
-      const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
-      const result = body.workspace
-        ? await service.workspaceIngest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, body.workspace, undefined, effectiveConfig)
-        : body.skipExtraction
-          ? await service.storeVerbatim(body.userId, body.conversation, body.sourceSite, body.sourceUrl, effectiveConfig)
-          : await service.quickIngest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, undefined, effectiveConfig);
-      res.json(formatIngestResponse(result));
+      await handleIngestRequest(service, req, res, 'quick');
     } catch (err) {
       handleRouteError(res, 'POST /v1/memories/ingest/quick', err);
     }
   });
+}
+
+async function handleIngestRequest(
+  service: MemoryService,
+  req: Request,
+  res: Response,
+  mode: 'full' | 'quick',
+): Promise<void> {
+  const { body, effectiveConfig } = readIngestRequest(req, res);
+  const result = await runIngest(service, body, effectiveConfig, mode);
+  res.json(formatIngestResponse(result));
+}
+
+async function runIngest(
+  service: MemoryService,
+  body: IngestBody,
+  effectiveConfig: MemoryServiceDeps['config'] | undefined,
+  mode: 'full' | 'quick',
+) {
+  if (body.workspace) {
+    return service.workspaceIngest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, body.workspace, undefined, effectiveConfig);
+  }
+  if (mode === 'full') {
+    return service.ingest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, undefined, effectiveConfig);
+  }
+  if (body.skipExtraction) {
+    return service.storeVerbatim(body.userId, body.conversation, body.sourceSite, body.sourceUrl, effectiveConfig);
+  }
+  return service.quickIngest(body.userId, body.conversation, body.sourceSite, body.sourceUrl, undefined, effectiveConfig);
 }
 
 /**
@@ -197,6 +219,26 @@ function resolveSearchPreamble(body: SearchBody, maxSearchResults: number) {
   return { scope, requestLimit };
 }
 
+function readIngestRequest(req: Request, res: Response): IngestRequestContext {
+  const body = req.body as IngestBody;
+  return {
+    body,
+    effectiveConfig: applyRequestConfigOverride(res, body.configOverride),
+  };
+}
+
+function readSearchRequest(
+  req: Request,
+  res: Response,
+  configRouteAdapter: RuntimeConfigRouteAdapter,
+): SearchRequestContext {
+  const body = req.body as SearchBody;
+  const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
+  const maxSearchResults = effectiveConfig?.maxSearchResults ?? configRouteAdapter.current().maxSearchResults;
+  const { scope, requestLimit } = resolveSearchPreamble(body, maxSearchResults);
+  return { body, effectiveConfig, scope, requestLimit };
+}
+
 function registerSearchRoute(
   router: Router,
   service: MemoryService,
@@ -204,10 +246,7 @@ function registerSearchRoute(
 ): void {
   router.post('/search', validateBody(SearchBodySchema), async (req: Request, res: Response) => {
     try {
-      const body = req.body as SearchBody;
-      const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
-      const maxSearchResults = effectiveConfig?.maxSearchResults ?? configRouteAdapter.current().maxSearchResults;
-      const { scope, requestLimit } = resolveSearchPreamble(body, maxSearchResults);
+      const { body, effectiveConfig, scope, requestLimit } = readSearchRequest(req, res, configRouteAdapter);
       const retrievalOptions: { retrievalMode?: SearchBody['retrievalMode']; tokenBudget?: SearchBody['tokenBudget']; skipRepairLoop?: boolean } = {
         retrievalMode: body.retrievalMode,
         tokenBudget: body.tokenBudget,
@@ -239,10 +278,7 @@ function registerFastSearchRoute(
 ): void {
   router.post('/search/fast', validateBody(SearchBodySchema), async (req: Request, res: Response) => {
     try {
-      const body = req.body as SearchBody;
-      const effectiveConfig = applyRequestConfigOverride(res, body.configOverride);
-      const maxSearchResults = effectiveConfig?.maxSearchResults ?? configRouteAdapter.current().maxSearchResults;
-      const { scope, requestLimit } = resolveSearchPreamble(body, maxSearchResults);
+      const { body, effectiveConfig, scope, requestLimit } = readSearchRequest(req, res, configRouteAdapter);
       const result = await service.scopedSearch(scope, body.query, {
         fast: true,
         sourceSite: body.sourceSite,
@@ -493,12 +529,7 @@ function registerGetRoute(router: Router, service: MemoryService): void {
     validateQuery(MemoryByIdQuerySchema),
     async (req: Request, res: Response) => {
       try {
-        const { id: memoryId } = req.params as unknown as { id: string };
-        const q = req.query as unknown as {
-          userId: string;
-          workspaceId: string | undefined;
-          agentId: string | undefined;
-        };
+        const { memoryId, q } = readMemoryByIdRequest(req);
         const memory = q.workspaceId
           ? await service.scopedGet(
               { kind: 'workspace', userId: q.userId, workspaceId: q.workspaceId, agentId: q.agentId! },
@@ -524,12 +555,7 @@ function registerDeleteRoute(router: Router, service: MemoryService): void {
     validateQuery(MemoryByIdQuerySchema),
     async (req: Request, res: Response) => {
       try {
-        const { id: memoryId } = req.params as unknown as { id: string };
-        const q = req.query as unknown as {
-          userId: string;
-          workspaceId: string | undefined;
-          agentId: string | undefined;
-        };
+        const { memoryId, q } = readMemoryByIdRequest(req);
         if (q.workspaceId) {
           const deleted = await service.scopedDelete(
             { kind: 'workspace', userId: q.userId, workspaceId: q.workspaceId, agentId: q.agentId! },
@@ -548,6 +574,14 @@ function registerDeleteRoute(router: Router, service: MemoryService): void {
       }
     },
   );
+}
+
+function readMemoryByIdRequest(req: Request): { memoryId: string; q: MemoryByIdRouteQuery } {
+  const { id: memoryId } = req.params as unknown as { id: string };
+  return {
+    memoryId,
+    q: req.query as unknown as MemoryByIdRouteQuery,
+  };
 }
 
 function registerAuditSummaryRoute(router: Router, service: MemoryService): void {
@@ -676,22 +710,7 @@ function applyCorsHeaders(req: Request, res: Response): void {
 
 
 function readRuntimeConfigRouteSnapshot(): RuntimeConfigRouteSnapshot {
-  return {
-    retrievalProfile: config.retrievalProfile,
-    embeddingProvider: config.embeddingProvider,
-    embeddingModel: config.embeddingModel,
-    llmProvider: config.llmProvider,
-    llmModel: config.llmModel,
-    clarificationConflictThreshold: config.clarificationConflictThreshold,
-    maxSearchResults: config.maxSearchResults,
-    hybridSearchEnabled: config.hybridSearchEnabled,
-    iterativeRetrievalEnabled: config.iterativeRetrievalEnabled,
-    entityGraphEnabled: config.entityGraphEnabled,
-    crossEncoderEnabled: config.crossEncoderEnabled,
-    agenticRetrievalEnabled: config.agenticRetrievalEnabled,
-    repairLoopEnabled: config.repairLoopEnabled,
-    runtimeConfigMutationEnabled: config.runtimeConfigMutationEnabled,
-  };
+  return projectRuntimeConfigRouteSnapshot(config);
 }
 
 function toSnakeCase(camel: string): string {

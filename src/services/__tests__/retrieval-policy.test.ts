@@ -36,6 +36,11 @@ const retrievalProfileSettings: RetrievalProfile = {
 
 const mockConfig = {
   adaptiveRetrievalEnabled: true,
+  adaptiveSimpleLimit: 5,
+  adaptiveMediumLimit: 5,
+  adaptiveComplexLimit: 8,
+  adaptiveMultiHopLimit: 12,
+  adaptiveAggregationLimit: 25,
   maxSearchResults: 10,
   repairLoopEnabled: true,
   repairLoopMinSimilarity: 0.3,
@@ -127,6 +132,23 @@ describe('resolveSearchLimit', () => {
     const limit = resolveSearchLimit('How many model kits have I bought?', undefined, mockConfig);
     expect(limit).toBe(AGGREGATION_QUERY_LIMIT);
     expect(limit).toBeGreaterThan(mockConfig.maxSearchResults);
+  });
+
+  it('uses configured adaptive limits when no explicit limit is provided', () => {
+    mockConfig.adaptiveSimpleLimit = 7;
+    mockConfig.adaptiveComplexLimit = 11;
+
+    expect(resolveSearchLimit('what is TypeScript?', undefined, mockConfig)).toBe(7);
+    expect(resolveSearchLimit('how did the architecture change', undefined, mockConfig)).toBe(10);
+
+    mockConfig.adaptiveSimpleLimit = 5;
+    mockConfig.adaptiveComplexLimit = 8;
+  });
+
+  it('uses configured aggregation limit without maxSearchResults clamp', () => {
+    mockConfig.adaptiveAggregationLimit = 30;
+    expect(resolveSearchLimit('How many model kits have I bought?', undefined, mockConfig)).toBe(30);
+    mockConfig.adaptiveAggregationLimit = 25;
   });
 
   it('detects "how many" as aggregation', () => {

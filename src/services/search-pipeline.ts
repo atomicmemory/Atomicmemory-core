@@ -36,6 +36,8 @@ import { DEFAULT_RRF_K, weightedRRF } from './rrf-fusion.js';
 import { applyIterativeRetrieval } from './iterative-retrieval.js';
 import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
+import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
+import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 
 const TEMPORAL_NEIGHBOR_WINDOW_MINUTES = 30;
 const SEMANTIC_RRF_WEIGHT = 1.2;
@@ -45,6 +47,11 @@ const KEYWORD_RRF_WEIGHT = 1.0;
 export type SearchPipelineRuntimeConfig = Pick<
   CoreRuntimeConfig,
   | 'adaptiveRetrievalEnabled'
+  | 'adaptiveSimpleLimit'
+  | 'adaptiveMediumLimit'
+  | 'adaptiveComplexLimit'
+  | 'adaptiveMultiHopLimit'
+  | 'adaptiveAggregationLimit'
   | 'agenticRetrievalEnabled'
   | 'crossEncoderDtype'
   | 'crossEncoderEnabled'
@@ -57,6 +64,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'linkExpansionEnabled'
   | 'linkExpansionMax'
   | 'linkSimilarityThreshold'
+  | 'literalListProtectionEnabled'
+  | 'literalListProtectionMaxProtected'
   | 'maxSearchResults'
   | 'mmrEnabled'
   | 'mmrLambda'
@@ -74,6 +83,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'rerankSkipMinGap'
   | 'rerankSkipTopSimilarity'
   | 'retrievalProfileSettings'
+  | 'temporalQueryConstraintBoost'
+  | 'temporalQueryConstraintEnabled'
 >;
 /**
  * Decide whether to auto-skip cross-encoder reranking.
@@ -677,90 +688,211 @@ async function applyExpansionAndReranking(
   skipReranking?: boolean,
   policyConfig: SearchPipelineRuntimeConfig = config,
 ): Promise<SearchResult[]> {
-  // Cross-encoder reranking: re-score candidates before MMR
-  let candidates = results;
-  let protectedFingerprints = [...temporalAnchorFingerprints];
-  const shouldSkipRerank = skipReranking || shouldAutoSkipReranking(results, policyConfig);
-  if (policyConfig.crossEncoderEnabled && !shouldSkipRerank) {
-    const rerankerConfig = {
-      crossEncoderModel: policyConfig.crossEncoderModel,
-      crossEncoderDtype: policyConfig.crossEncoderDtype,
-    };
-    candidates = await rerankCandidates(query, results, rerankerConfig);
-    trace.stage('cross-encoder', candidates, {
-      model: rerankerConfig.crossEncoderModel,
-      dtype: rerankerConfig.crossEncoderDtype,
-    });
-  } else if (policyConfig.crossEncoderEnabled && shouldSkipRerank) {
-    console.log(`[reranker] Skipped: ${skipReranking ? 'explicit' : 'auto-skip (high-confidence results)'}`);
-  }
-  const subjectRanked = applySubjectAwareRanking(query, candidates);
-  if (subjectRanked.subjects.length > 0) {
-    candidates = subjectRanked.results;
-    protectedFingerprints = [...protectedFingerprints, ...subjectRanked.protectedFingerprints];
-    trace.stage('subject-aware-ranking', candidates, {
-      subjects: subjectRanked.subjects,
-      keywords: subjectRanked.keywords,
-      protected: subjectRanked.protectedFingerprints.length,
-    });
-  }
-  const currentStateRanked = applyCurrentStateRanking(query, candidates);
-  if (currentStateRanked.triggered) {
-    candidates = currentStateRanked.results;
-    trace.stage('current-state-ranking', candidates, {});
-  }
-
-  candidates = applyConcisenessPenalty(candidates);
-
-  if (policyConfig.linkExpansionBeforeMMR && policyConfig.linkExpansionEnabled && policyConfig.mmrEnabled) {
-    const preExpanded = await expandWithLinks(
-      stores,
-      userId,
-      candidates.slice(0, limit),
-      queryEmbedding,
-      referenceTime,
-      policyConfig,
-    );
-    trace.stage('link-expansion', preExpanded, { order: 'before-mmr' });
-    const selected = preserveProtectedResults(
-      applyMMR(preExpanded, queryEmbedding, limit, policyConfig.mmrLambda),
-      preExpanded,
-      protectedFingerprints,
-      limit,
-    );
-    trace.stage('mmr', selected, { lambda: policyConfig.mmrLambda });
-    return selected;
-  }
-
-  if (policyConfig.mmrEnabled) {
-    const mmrResults = preserveProtectedResults(
-      applyMMR(candidates, queryEmbedding, limit, policyConfig.mmrLambda),
-      candidates,
-      protectedFingerprints,
-      limit,
-    );
-    trace.stage('mmr', mmrResults, { lambda: policyConfig.mmrLambda });
-    const expanded = await expandWithLinks(
-      stores,
-      userId,
-      mmrResults,
-      queryEmbedding,
-      referenceTime,
-      policyConfig,
-    );
-    trace.stage('link-expansion', expanded, { order: 'after-mmr' });
-    return expanded;
-  }
-
-  const sliced = preserveProtectedResults(candidates.slice(0, limit), candidates, protectedFingerprints, limit);
-  const expanded = await expandWithLinks(
-    stores,
-    userId,
-    sliced,
-    queryEmbedding,
-    referenceTime,
+  const reranked = await applyCrossEncoderStage(query, results, skipReranking, trace, policyConfig);
+  const ranked = applyRankingProtectionStages(
+    query,
+    reranked,
+    temporalAnchorFingerprints,
+    trace,
     policyConfig,
   );
+
+  return selectAndExpandCandidates(
+    stores,
+    userId,
+    ranked.candidates,
+    queryEmbedding,
+    limit,
+    referenceTime,
+    ranked.protectedFingerprints,
+    trace,
+    policyConfig,
+  );
+}
+
+interface RankedCandidateState {
+  candidates: SearchResult[];
+  protectedFingerprints: string[];
+}
+
+async function applyCrossEncoderStage(
+  query: string,
+  results: SearchResult[],
+  skipReranking: boolean | undefined,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  const shouldSkipRerank = skipReranking || shouldAutoSkipReranking(results, policyConfig);
+  if (!policyConfig.crossEncoderEnabled) return results;
+  if (shouldSkipRerank) {
+    console.log(`[reranker] Skipped: ${skipReranking ? 'explicit' : 'auto-skip (high-confidence results)'}`);
+    return results;
+  }
+
+  const rerankerConfig = {
+    crossEncoderModel: policyConfig.crossEncoderModel,
+    crossEncoderDtype: policyConfig.crossEncoderDtype,
+  };
+  const candidates = await rerankCandidates(query, results, rerankerConfig);
+  trace.stage('cross-encoder', candidates, {
+    model: rerankerConfig.crossEncoderModel,
+    dtype: rerankerConfig.crossEncoderDtype,
+  });
+  return candidates;
+}
+
+function applyRankingProtectionStages(
+  query: string,
+  candidates: SearchResult[],
+  temporalAnchorFingerprints: string[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  let state = applySubjectRankingStage(query, candidates, temporalAnchorFingerprints, trace);
+  state = applyLiteralProtectionStage(query, state, trace, policyConfig);
+  state = applyTemporalConstraintStage(query, state, trace, policyConfig);
+
+  const currentStateRanked = applyCurrentStateRanking(query, state.candidates);
+  if (currentStateRanked.triggered) {
+    trace.stage('current-state-ranking', currentStateRanked.results, {});
+    state = { ...state, candidates: currentStateRanked.results };
+  }
+
+  return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
+}
+
+function applySubjectRankingStage(
+  query: string,
+  candidates: SearchResult[],
+  protectedFingerprints: string[],
+  trace: TraceCollector,
+): RankedCandidateState {
+  const subjectRanked = applySubjectAwareRanking(query, candidates);
+  if (subjectRanked.subjects.length === 0) return { candidates, protectedFingerprints };
+
+  trace.stage('subject-aware-ranking', subjectRanked.results, {
+    subjects: subjectRanked.subjects,
+    keywords: subjectRanked.keywords,
+    protected: subjectRanked.protectedFingerprints.length,
+  });
+  return {
+    candidates: subjectRanked.results,
+    protectedFingerprints: [...protectedFingerprints, ...subjectRanked.protectedFingerprints],
+  };
+}
+
+function applyLiteralProtectionStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  if (!policyConfig.literalListProtectionEnabled) return state;
+  const literalProtected = protectLiteralListAnswerCandidates(
+    query,
+    state.candidates,
+    policyConfig.literalListProtectionMaxProtected,
+  );
+  trace.stage('literal-list-protection', literalProtected.results, {
+    protected: literalProtected.protectedFingerprints.length,
+    protected_ids: literalProtected.protectedIds,
+    reasons: literalProtected.reasons,
+  });
+  return {
+    candidates: literalProtected.results,
+    protectedFingerprints: [...state.protectedFingerprints, ...literalProtected.protectedFingerprints],
+  };
+}
+
+function applyTemporalConstraintStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  if (!policyConfig.temporalQueryConstraintEnabled) return state;
+  const constrained = applyTemporalQueryConstraints(query, state.candidates, policyConfig.temporalQueryConstraintBoost);
+  trace.stage('temporal-query-constraints', constrained.results, {
+    constraints: constrained.constraints,
+    protected: constrained.protectedFingerprints.length,
+    protected_ids: constrained.protectedIds,
+    boost: policyConfig.temporalQueryConstraintBoost,
+  });
+  return {
+    candidates: constrained.results,
+    protectedFingerprints: [...state.protectedFingerprints, ...constrained.protectedFingerprints],
+  };
+}
+
+async function selectAndExpandCandidates(
+  stores: SearchPipelineStores,
+  userId: string,
+  candidates: SearchResult[],
+  queryEmbedding: number[],
+  limit: number,
+  referenceTime: Date | undefined,
+  protectedFingerprints: string[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  if (policyConfig.linkExpansionBeforeMMR && policyConfig.linkExpansionEnabled && policyConfig.mmrEnabled) {
+    return selectWithPreMmrExpansion(stores, userId, candidates, queryEmbedding, limit, referenceTime, protectedFingerprints, trace, policyConfig);
+  }
+  if (policyConfig.mmrEnabled) {
+    return selectWithMmrThenExpand(stores, userId, candidates, queryEmbedding, limit, referenceTime, protectedFingerprints, trace, policyConfig);
+  }
+  return selectWithoutMmr(stores, userId, candidates, queryEmbedding, limit, referenceTime, protectedFingerprints, trace, policyConfig);
+}
+
+async function selectWithPreMmrExpansion(
+  stores: SearchPipelineStores,
+  userId: string,
+  candidates: SearchResult[],
+  queryEmbedding: number[],
+  limit: number,
+  referenceTime: Date | undefined,
+  protectedFingerprints: string[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  const preExpanded = await expandWithLinks(stores, userId, candidates.slice(0, limit), queryEmbedding, referenceTime, policyConfig);
+  trace.stage('link-expansion', preExpanded, { order: 'before-mmr' });
+  const selected = preserveProtectedResults(applyMMR(preExpanded, queryEmbedding, limit, policyConfig.mmrLambda), preExpanded, protectedFingerprints, limit);
+  trace.stage('mmr', selected, { lambda: policyConfig.mmrLambda });
+  return selected;
+}
+
+async function selectWithMmrThenExpand(
+  stores: SearchPipelineStores,
+  userId: string,
+  candidates: SearchResult[],
+  queryEmbedding: number[],
+  limit: number,
+  referenceTime: Date | undefined,
+  protectedFingerprints: string[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  const mmrResults = preserveProtectedResults(applyMMR(candidates, queryEmbedding, limit, policyConfig.mmrLambda), candidates, protectedFingerprints, limit);
+  trace.stage('mmr', mmrResults, { lambda: policyConfig.mmrLambda });
+  const expanded = await expandWithLinks(stores, userId, mmrResults, queryEmbedding, referenceTime, policyConfig);
+  trace.stage('link-expansion', expanded, { order: 'after-mmr' });
+  return expanded;
+}
+
+async function selectWithoutMmr(
+  stores: SearchPipelineStores,
+  userId: string,
+  candidates: SearchResult[],
+  queryEmbedding: number[],
+  limit: number,
+  referenceTime: Date | undefined,
+  protectedFingerprints: string[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  const sliced = preserveProtectedResults(candidates.slice(0, limit), candidates, protectedFingerprints, limit);
+  const expanded = await expandWithLinks(stores, userId, sliced, queryEmbedding, referenceTime, policyConfig);
   trace.stage('link-expansion', expanded, { order: 'no-mmr' });
   return expanded;
 }

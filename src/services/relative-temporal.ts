@@ -69,6 +69,14 @@ const RELATIVE_PATTERNS: RelativePattern[] = [
     }),
   },
   {
+    regex: /\blast month\b/gi,
+    resolve: (recordedDate) => ({
+      eventDate: formatIsoMonth(shiftMonths(recordedDate, -1)),
+      precision: 'month',
+      phrase: 'last month',
+    }),
+  },
+  {
     regex: /\bnext month\b/gi,
     resolve: (recordedDate) => ({
       eventDate: formatIsoMonth(shiftMonths(recordedDate, 1)),

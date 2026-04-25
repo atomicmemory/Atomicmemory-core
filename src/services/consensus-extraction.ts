@@ -16,6 +16,7 @@ import { cachedExtractFacts } from './extraction-cache.js';
 import { chunkedExtractFacts } from './chunked-extraction.js';
 import { cosineSimilarity, embedText } from './embedding.js';
 import { classifyNetwork } from './memory-network.js';
+import { mergeQuotedEntityFacts } from './quoted-entity-extraction.js';
 
 const SIMILARITY_THRESHOLD = 0.90;
 
@@ -28,6 +29,8 @@ export interface ConsensusExtractionConfig {
   consensusExtractionEnabled: boolean;
   consensusExtractionRuns: number;
   chunkedExtractionEnabled: boolean;
+  observationDateExtractionEnabled: boolean;
+  quotedEntityExtractionEnabled: boolean;
 }
 
 interface FactWithEmbedding {
@@ -49,33 +52,54 @@ export async function consensusExtractFacts(
   config: ConsensusExtractionConfig,
 ): Promise<ExtractedFact[]> {
   if (!config.consensusExtractionEnabled) {
-    return config.chunkedExtractionEnabled
-      ? chunkedExtractFacts(conversationText)
-      : cachedExtractFacts(conversationText);
+    const options = buildExtractionOptions(config);
+    const facts = await (config.chunkedExtractionEnabled
+      ? chunkedExtractFacts(conversationText, options)
+      : cachedExtractFacts(conversationText, options));
+    return applyOptionalQuotedEntityExtraction(facts, conversationText, config);
   }
 
-  const allRunFacts = await runMultipleExtractions(conversationText, config.consensusExtractionRuns);
+  const allRunFacts = await runMultipleExtractions(conversationText, config);
   const mode = (process.env.CONSENSUS_MODE || 'consensus').toLowerCase();
 
   if (mode === 'union') {
     const unique = await deduplicateFacts(allRunFacts.flat());
-    return applyNetworkClassification(unique);
+    return applyNetworkClassification(applyOptionalQuotedEntityExtraction(unique, conversationText, config));
   }
 
   const stableFacts = await filterByMajorityVote(allRunFacts);
-  return applyNetworkClassification(stableFacts);
+  return applyNetworkClassification(applyOptionalQuotedEntityExtraction(stableFacts, conversationText, config));
+}
+
+function applyOptionalQuotedEntityExtraction(
+  facts: ExtractedFact[],
+  conversationText: string,
+  config: Pick<ConsensusExtractionConfig, 'quotedEntityExtractionEnabled'>,
+): ExtractedFact[] {
+  return config.quotedEntityExtractionEnabled
+    ? mergeQuotedEntityFacts(facts, conversationText)
+    : facts;
 }
 
 /** Run extractFacts() N times to get independent LLM samples. */
 async function runMultipleExtractions(
   conversationText: string,
-  runs: number,
+  config: Pick<ConsensusExtractionConfig, 'consensusExtractionRuns' | 'observationDateExtractionEnabled'>,
 ): Promise<ExtractedFact[][]> {
   const allRunFacts: ExtractedFact[][] = [];
-  for (let i = 0; i < runs; i++) {
-    allRunFacts.push(await extractFacts(conversationText));
+  const options = buildExtractionOptions(config);
+  for (let i = 0; i < config.consensusExtractionRuns; i++) {
+    allRunFacts.push(await extractFacts(conversationText, options));
   }
   return allRunFacts;
+}
+
+function buildExtractionOptions(
+  config: Pick<ConsensusExtractionConfig, 'observationDateExtractionEnabled'>,
+) {
+  return {
+    observationDateExtractionEnabled: config.observationDateExtractionEnabled,
+  };
 }
 
 /** Keep only facts from run[0] that appear in a majority of all runs. */

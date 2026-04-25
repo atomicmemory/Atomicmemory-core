@@ -10,6 +10,7 @@ import { assessWriteSecurity } from './write-security.js';
 import { timed } from './timing.js';
 import { runPostWriteProcessors } from './ingest-post-write.js';
 import { processFactThroughPipeline } from './ingest-fact-pipeline.js';
+import { resolveSessionDate } from './session-date.js';
 import type { WorkspaceContext } from '../db/repository-types.js';
 import type {
   IngestResult,
@@ -69,6 +70,7 @@ export async function performIngest(
   sessionTimestamp?: Date,
 ): Promise<IngestResult> {
   const ingestStart = performance.now();
+  const logicalSessionTimestamp = resolveSessionDate(sessionTimestamp, conversationText);
   const episodeId = await timed('ingest.store-episode', () => deps.stores.episode.storeEpisode({ userId, content: conversationText, sourceSite, sourceUrl }));
   const facts = await timed('ingest.extract', () => consensusExtractFacts(conversationText, deps.config));
   const acc = createIngestAccumulator();
@@ -79,7 +81,7 @@ export async function performIngest(
   for (const fact of facts) {
     const result = await timed('ingest.fact', () => processFactThroughPipeline(
       deps, userId, fact, sourceSite, sourceUrl, episodeId,
-      { entropyGate: true, fullAudn: true, supersededTargets, entropyCtx, logicalTimestamp: sessionTimestamp, timingPrefix: 'ingest' },
+      { entropyGate: true, fullAudn: true, supersededTargets, entropyCtx, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'ingest' },
     ));
     accumulateFactResult(acc, result);
     if (result.memoryId) storedFacts.push({ memoryId: result.memoryId, fact });
@@ -88,7 +90,7 @@ export async function performIngest(
   const postWrite = await runPostWriteProcessors(deps, userId, {
     episodeId, sourceSite, sourceUrl, storedFacts,
     memoryIds: acc.memoryIds, embeddingCache: acc.embeddingCache,
-    sessionTimestamp, compositesEnabled: deps.config.compositeGroupingEnabled,
+    sessionTimestamp: logicalSessionTimestamp, compositesEnabled: deps.config.compositeGroupingEnabled,
     timingPrefix: 'ingest',
   });
 
@@ -109,6 +111,7 @@ export async function performQuickIngest(
   sessionTimestamp?: Date,
 ): Promise<IngestResult> {
   const ingestStart = performance.now();
+  const logicalSessionTimestamp = resolveSessionDate(sessionTimestamp, conversationText);
   const episodeId = await deps.stores.episode.storeEpisode({ userId, content: conversationText, sourceSite, sourceUrl });
   const facts = timed('quick-ingest.extract', () => Promise.resolve(quickExtractFacts(conversationText)));
   const extractedFacts = await facts;
@@ -117,7 +120,7 @@ export async function performQuickIngest(
   for (const fact of extractedFacts) {
     const result = await timed('quick-ingest.fact', () => processFactThroughPipeline(
       deps, userId, fact, sourceSite, sourceUrl, episodeId,
-      { entropyGate: false, fullAudn: false, supersededTargets: new Set(), entropyCtx: { seenEntities: new Set(), previousEmbedding: null }, logicalTimestamp: sessionTimestamp, timingPrefix: 'quick-ingest' },
+      { entropyGate: false, fullAudn: false, supersededTargets: new Set(), entropyCtx: { seenEntities: new Set(), previousEmbedding: null }, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'quick-ingest' },
     ));
     accumulateFactResult(acc, result);
   }
@@ -125,7 +128,7 @@ export async function performQuickIngest(
   const postWrite = await runPostWriteProcessors(deps, userId, {
     episodeId, sourceSite, sourceUrl, storedFacts: [],
     memoryIds: acc.memoryIds, embeddingCache: acc.embeddingCache,
-    sessionTimestamp, compositesEnabled: false,
+    sessionTimestamp: logicalSessionTimestamp, compositesEnabled: false,
     timingPrefix: 'quick-ingest',
   });
 
@@ -191,6 +194,7 @@ export async function performWorkspaceIngest(
   sessionTimestamp?: Date,
 ): Promise<IngestResult> {
   const ingestStart = performance.now();
+  const logicalSessionTimestamp = resolveSessionDate(sessionTimestamp, conversationText);
   const episodeId = await timed('ws-ingest.store-episode', () =>
     deps.stores.episode.storeEpisode({
       userId, content: conversationText, sourceSite, sourceUrl,
@@ -205,7 +209,15 @@ export async function performWorkspaceIngest(
   for (const fact of facts) {
     const result = await timed('ws-ingest.fact', () =>
       processFactThroughPipeline(deps, userId, fact, sourceSite, sourceUrl, episodeId,
-        { workspace, entropyGate: false, fullAudn: true, supersededTargets, entropyCtx, timingPrefix: 'ws-ingest' }),
+        {
+          workspace,
+          entropyGate: false,
+          fullAudn: true,
+          supersededTargets,
+          entropyCtx,
+          logicalTimestamp: logicalSessionTimestamp,
+          timingPrefix: 'ws-ingest',
+        }),
     );
     accumulateFactResult(acc, result);
   }
@@ -213,12 +225,10 @@ export async function performWorkspaceIngest(
   const postWrite = await runPostWriteProcessors(deps, userId, {
     episodeId, sourceSite, sourceUrl, storedFacts: [],
     memoryIds: acc.memoryIds, embeddingCache: acc.embeddingCache,
-    sessionTimestamp, compositesEnabled: false,
+    sessionTimestamp: logicalSessionTimestamp, compositesEnabled: false,
     timingPrefix: 'ws-ingest',
   });
 
   console.log(`[timing] ws-ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${facts.length} facts, workspace=${workspace.workspaceId})`);
   return buildIngestResult(episodeId, facts.length, acc, postWrite.linksCreated, 0);
 }
-
-

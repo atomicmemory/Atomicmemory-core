@@ -10,12 +10,12 @@ import { quickExtractFacts } from './quick-extraction.js';
 import { containsRelativeTemporalPhrase } from './relative-temporal.js';
 
 const LITERAL_DETAIL_PATTERN =
-  /\b(?:necklace|book|books|song|songs|music|musicians|fan|painting|paintings|photo|poster|posters|library|store|decor|furniture|flooring|pet|pets|cat|cats|dog|dogs|guinea pig|workshop|poetry reading|sign|slipper|bowl)\b/i;
+  /\b(?:necklace|book|books|song|songs|music|musicians|fan|painting|paintings|photo|poster|posters|library|store|decor|furniture|flooring|pet|pets|cat|cats|dog|dogs|guinea pig|turtle|turtles|snake|snakes|workshop|poetry reading|sign|slipper|bowl)\b/i;
 const QUOTED_TEXT_PATTERN = /["“”][^"“”]{2,}["“”]/;
 const TEMPORAL_DETAIL_PATTERN =
-  /\b(last year|last month|last week|last [a-z]+|today|tomorrow|first|second|before|after|deadline|deadlines|timeline|relative to|months later|weeks later)\b/i;
+  /\b(last year|last month|last week|last [a-z]+|today|tomorrow|first|second|before|after|deadline|deadlines|timeline|relative to|months later|weeks later|few days ago|for \d+ years?|for three years?|for two years?|for four years?|for five years?)\b/i;
 const EVENT_DETAIL_PATTERN =
-  /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf)\b/i;
+  /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf|trip|travel(?:ed|ling)?|retreat|phuket|doctor|doc|check-up|appointment|blog|car mods?|restor(?:e|ed|ing|ation))\b/i;
 
 export function mergeSupplementalFacts(
   primaryFacts: ExtractedFact[],
@@ -69,9 +69,16 @@ function shouldIncludeSupplementalFact(
     return false;
   }
 
-  return shapeMatches.every(
-    (fact) => !hasRelativeTemporalDetail(fact.fact) && !hasLiteralDetail(fact.fact) && !hasEventDetail(fact.fact),
-  );
+  if (candidateAddsTemporalDetail) {
+    return shapeMatches.every((fact) => !hasRelativeTemporalDetail(fact.fact));
+  }
+  if (candidateAddsLiteralDetail) {
+    return shapeMatches.every((fact) => !hasLiteralDetail(fact.fact));
+  }
+  if (candidateAddsEventDetail) {
+    return shapeMatches.every((fact) => !hasEventDetail(fact.fact));
+  }
+  return false;
 }
 
 function findUpgradeableFactIndex(

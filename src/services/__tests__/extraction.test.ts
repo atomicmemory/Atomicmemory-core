@@ -4,7 +4,7 @@
  * and default decision construction — all without LLM calls.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 /** Mock llm and fact-normalization to avoid config.ts env var requirements. */
 vi.mock('../llm.js', () => ({ llm: { chat: vi.fn() } }));
@@ -12,9 +12,11 @@ vi.mock('../fact-normalization.js', () => ({
   normalizeExtractedFacts: (facts: unknown[]) => facts,
 }));
 
+const { llm } = await import('../llm.js');
 const {
   normalizeAction,
   defaultDecision,
+  resolveAUDN,
   normalizeConfidence,
   inferConflictConfidence,
   generateFallbackHeadline,
@@ -24,6 +26,11 @@ const {
 } = await import('../extraction.js');
 
 type AUDNAction = Awaited<ReturnType<typeof normalizeAction>>;
+const mockLlmChat = vi.mocked(llm.chat);
+
+beforeEach(() => {
+  mockLlmChat.mockReset();
+});
 
 describe('normalizeAction', () => {
   it('passes through valid uppercase actions', () => {
@@ -73,6 +80,63 @@ describe('defaultDecision', () => {
     const b = defaultDecision();
     expect(a).not.toBe(b);
     expect(a).toEqual(b);
+  });
+});
+
+describe('resolveAUDN', () => {
+  it('parses fenced Anthropic JSON responses', async () => {
+    mockLlmChat.mockResolvedValueOnce(`\`\`\`json
+{
+  "action": "NOOP",
+  "target_memory_id": "11111111-1111-4111-8111-111111111111",
+  "updated_content": null,
+  "clarification_note": null,
+  "contradiction_confidence": null
+}
+\`\`\``);
+
+    const decision = await resolveAUDN('User likes Vite.', [{
+      id: '11111111-1111-4111-8111-111111111111',
+      content: 'User likes Vite.',
+      similarity: 0.99,
+    }]);
+
+    expect(decision.action).toBe('NOOP');
+    expect(decision.targetMemoryId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('extracts JSON when the model includes prose around the object', async () => {
+    mockLlmChat.mockResolvedValueOnce(`The answer is:
+{
+  "action": "ADD",
+  "target_memory_id": null,
+  "updated_content": null,
+  "clarification_note": null,
+  "contradiction_confidence": null
+}
+This is final.`);
+
+    const decision = await resolveAUDN('User uses Supabase.', []);
+
+    expect(decision).toEqual(defaultDecision());
+  });
+
+  it('requests a larger AUDN output budget for Anthropic-compatible models', async () => {
+    mockLlmChat.mockResolvedValueOnce(JSON.stringify({
+      action: 'ADD',
+      target_memory_id: null,
+      updated_content: null,
+      clarification_note: null,
+      contradiction_confidence: null,
+    }));
+
+    await resolveAUDN('User uses Tailwind.', []);
+
+    expect(mockLlmChat).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({
+      jsonMode: true,
+      maxTokens: 2048,
+      temperature: 0,
+    }));
   });
 });
 

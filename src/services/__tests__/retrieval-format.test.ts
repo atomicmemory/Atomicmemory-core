@@ -14,7 +14,14 @@ vi.mock('../../config.js', () => ({
   config: mockConfig,
 }));
 
-const { buildCitations, computePackagingSignal, formatInjection, formatSimpleInjection, formatTieredInjection } = await import('../retrieval-format.js');
+const {
+  buildCitations,
+  buildInjection,
+  computePackagingSignal,
+  formatInjection,
+  formatSimpleInjection,
+  formatTieredInjection,
+} = await import('../retrieval-format.js');
 
 function makeResult(overrides: Partial<import('../../db/repository-types.js').SearchResult> = {}) {
   return createSearchResult({
@@ -200,6 +207,24 @@ describe('formatTieredInjection', () => {
     expect(result).not.toContain('<atomicmem_context');
     expect(result).not.toContain('<memory');
   });
+
+  it('retains temporal gap summaries in tiered mode', () => {
+    const memories = [
+      makeResult({ id: 'met', content: 'James met Samantha.', created_at: new Date('2022-08-10T00:00:00Z') }),
+      makeResult({ id: 'move', content: 'James and Samantha decided to move in.', created_at: new Date('2022-10-31T00:00:00Z') }),
+    ];
+    const assignments = [
+      { memoryId: 'met', tier: 'L2' as const, estimatedTokens: 5 },
+      { memoryId: 'move', tier: 'L2' as const, estimatedTokens: 5 },
+    ];
+    const result = formatTieredInjection(memories, assignments);
+
+    expect(result).toContain('Timeline:');
+    expect(result).toContain('2022-08-10 → 2022-10-31: ~3 months');
+    expect(result).toContain('Key temporal evidence:');
+    expect(result).toContain('- 2022-08-10: James met Samantha.');
+    expect(result).toContain('- 2022-10-31: James and Samantha decided to move in.');
+  });
 });
 
 describe('formatSimpleInjection', () => {
@@ -253,6 +278,23 @@ describe('formatSimpleInjection', () => {
     expect(result).toContain('### Subject: tools');
     expect(result).not.toContain('### Timeline:');
     expect(result).not.toContain('[CURRENT]');
+  });
+});
+
+describe('buildInjection query-term visibility', () => {
+  it('promotes a compressed memory when L0 hides an exact query term', () => {
+    const result = buildInjection([
+      makeResult({
+        id: 'workshop',
+        content: 'Caroline attended an LGBTQ+ counseling workshop for therapists. '.repeat(12),
+        summary: 'Caroline attended LGBTQ+ counseling...',
+        overview: 'Caroline attended an LGBTQ+ counseling workshop for therapists.',
+        score: 0.4,
+      }),
+    ], 'What workshop did Caroline attend recently?', 'tiered', 35);
+
+    expect(result.injectionText).toContain('[L1]');
+    expect(result.injectionText).toContain('workshop');
   });
 });
 

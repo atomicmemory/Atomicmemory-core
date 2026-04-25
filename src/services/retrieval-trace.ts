@@ -53,6 +53,9 @@ export interface RetrievalTraceSummary {
   candidateCount: number;
   queryText: string;
   skipRepair: boolean;
+  traceId?: string;
+  stageCount?: number;
+  stageNames?: string[];
 }
 
 export type PackagingType = 'subject-pack' | 'timeline-pack' | 'tiered';
@@ -157,7 +160,13 @@ export class TraceCollector {
   }
 
   getRetrievalSummary(): RetrievalTraceSummary | undefined {
-    return this.retrieval;
+    if (!this.retrieval) return undefined;
+    return {
+      ...this.retrieval,
+      traceId: this.traceId,
+      stageCount: this.stages.length,
+      stageNames: this.stages.map((stage) => stage.name),
+    };
   }
 
   getPackagingSummary(): PackagingTraceSummary | undefined {

@@ -26,13 +26,14 @@ describe('quickExtractFacts', () => {
 
   it('annotates relative temporal phrases with explicit anchors', () => {
     const facts = quickExtractFacts(
-      '[Session date: 2023-01-20]\nUser: Lost my job as a banker yesterday. Unfortunately I also lost my job at Door Dash this month. I plan to perform at a nearby festival next month. Started hitting the gym last week.',
+      '[Session date: 2023-01-20]\nUser: Lost my job as a banker yesterday. Unfortunately I also lost my job at Door Dash this month. I plan to perform at a nearby festival next month. Started hitting the gym last week. I attended a workshop last month.',
     );
 
     expect(facts.some((fact) => fact.fact.includes('yesterday (on January 19, 2023)'))).toBe(true);
     expect(facts.some((fact) => fact.fact.includes('this month (in January 2023)'))).toBe(true);
     expect(facts.some((fact) => fact.fact.includes('next month (in February 2023)'))).toBe(true);
     expect(facts.some((fact) => fact.fact.includes('last week (around January 13, 2023)'))).toBe(true);
+    expect(facts.some((fact) => fact.fact.includes('last month (in December 2022)'))).toBe(true);
   });
 
   it('preserves advisor and backup-plan detail in a multi-sentence turn', () => {
@@ -97,5 +98,19 @@ describe('quickExtractFacts', () => {
     expect(facts.some((fact) => fact.fact.includes('social media accounts'))).toBe(true);
     expect(facts.some((fact) => fact.fact.includes('Last Friday (on July 14, 2023)'))).toBe(true);
     expect(facts.some((fact) => fact.fact.includes('Shia Labeouf'))).toBe(true);
+  });
+
+  it('captures terse LoCoMo duration and medical event turns', () => {
+    const facts = quickExtractFacts(
+      [
+        '[Session date: 2023-05-24]',
+        'Nate: I like having some of these little turtles around to keep me calm.',
+        "Nate: I've had them for 3 years now and they bring me tons of joy!",
+        "Sam: Thanks, Evan. Appreciate the offer, but had a check-up with my doctor a few days ago and, yikes, the weight wasn't great.",
+      ].join('\n'),
+    );
+
+    expect(facts.some((fact) => fact.fact.includes('Nate has had the turtles for 3 years now'))).toBe(true);
+    expect(facts.some((fact) => fact.fact.includes('Sam had a check-up with Sam\'s doctor a few days ago'))).toBe(true);
   });
 });

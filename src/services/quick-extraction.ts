@@ -47,7 +47,7 @@ const MONTH_NAMES = [
 ];
 const SPEAKER_PREFIX_PATTERN = /^[A-Z][A-Za-z0-9' -]{1,40}:\s*/;
 const IMPLICIT_FIRST_PERSON_EVENT_PATTERN =
-  /^(?:started|starting|built|building|developed|developing|created|creating|launched|launching|opened|opening|accepted|receiv(?:ed|ing)|got|went|attended|visited|reading|posted|hosting|working|looking|planning|taking|took)\b/i;
+  /^(?:started|starting|built|building|developed|developing|created|creating|launched|launching|opened|opening|accepted|receiv(?:ed|ing)|got|had|went|attended|visited|reading|posted|hosting|working|looking|planning|taking|took)\b/i;
 
 /** Patterns that indicate a user is stating a fact about themselves. */
 const FIRST_PERSON_PATTERNS = [
@@ -56,6 +56,7 @@ const FIRST_PERSON_PATTERNS = [
   /\bwe\s+(?:use|used|have|had|built|created|switched|moved|started|decided|chose|plan|are|were)\b/i,
   /\bI['']m\s+(?:a|an|the|from|based|working|building|using|looking|trying|planning|learning|studying|interested|responsible|currently)\b/i,
   /\bI['']ve\s+(?:been|had|used|tried|built|worked|lived|started|finished|switched|decided)\b/i,
+  /\b(?:had|got)\s+(?:a\s+)?(?:check-up|doctor['’]?s appointment|doc['’]?s appointment)\b/i,
   /\bLet['’]?s\s+(?:create|collaborate|get together|make|work)\b/i,
   /\bI\s+should\b/i,
 ];
@@ -74,6 +75,12 @@ interface TurnEntry {
   source: 'user' | 'assistant';
 }
 
+interface TurnState {
+  currentTurn: string;
+  currentSpeaker: string | null;
+  currentSource: 'user' | 'assistant';
+}
+
 /**
  * Split conversation into turns, returning user turns and fact-bearing
  * assistant turns. Generic assistant chatter (acknowledgments, clarifying
@@ -82,35 +89,12 @@ interface TurnEntry {
 function extractFactBearingTurns(text: string): TurnEntry[] {
   const lines = text.split('\n');
   const turns: TurnEntry[] = [];
-  let currentTurn = '';
-  let currentSpeaker: string | null = null;
-  let currentSource: 'user' | 'assistant' = 'user';
+  const state: TurnState = { currentTurn: '', currentSpeaker: null, currentSource: 'user' };
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (SESSION_DATE_PATTERN.test(trimmed)) {
-      continue;
-    }
-    if (/^(?:User|Human|Me):/i.test(trimmed)) {
-      pushTurn(turns, currentTurn, currentSpeaker, currentSource);
-      currentTurn = trimmed.replace(/^(?:User|Human|Me):\s*/i, '');
-      currentSpeaker = null;
-      currentSource = 'user';
-    } else if (/^(?:Assistant|AI|Bot|Claude|ChatGPT|GPT):/i.test(trimmed)) {
-      pushTurn(turns, currentTurn, currentSpeaker, currentSource);
-      currentTurn = trimmed.replace(/^(?:Assistant|AI|Bot|Claude|ChatGPT|GPT):\s*/i, '');
-      currentSpeaker = null;
-      currentSource = 'assistant';
-    } else if (SPEAKER_PREFIX_PATTERN.test(trimmed)) {
-      pushTurn(turns, currentTurn, currentSpeaker, currentSource);
-      currentTurn = trimmed;
-      currentSpeaker = trimmed.match(/^([A-Z][A-Za-z0-9' -]{1,40}):/)?.[1] ?? null;
-      currentSource = 'user';
-    } else {
-      currentTurn += '\n' + trimmed;
-    }
+    applyTurnLine(turns, state, line.trim());
   }
-  pushTurn(turns, currentTurn, currentSpeaker, currentSource);
+  pushTurn(turns, state.currentTurn, state.currentSpeaker, state.currentSource);
 
   // If no turn markers found, treat entire text as user input
   if (turns.length === 0 && text.trim()) {
@@ -118,6 +102,35 @@ function extractFactBearingTurns(text: string): TurnEntry[] {
   }
 
   return turns;
+}
+
+function applyTurnLine(turns: TurnEntry[], state: TurnState, trimmed: string): void {
+  if (SESSION_DATE_PATTERN.test(trimmed)) return;
+  const speakerTurn = parseSpeakerTurn(trimmed);
+  if (!speakerTurn) {
+    state.currentTurn += '\n' + trimmed;
+    return;
+  }
+
+  pushTurn(turns, state.currentTurn, state.currentSpeaker, state.currentSource);
+  state.currentTurn = speakerTurn.text;
+  state.currentSpeaker = speakerTurn.speaker;
+  state.currentSource = speakerTurn.source;
+}
+
+function parseSpeakerTurn(trimmed: string): TurnEntry | null {
+  if (/^(?:User|Human|Me):/i.test(trimmed)) {
+    return { speaker: null, text: trimmed.replace(/^(?:User|Human|Me):\s*/i, ''), source: 'user' };
+  }
+  if (/^(?:Assistant|AI|Bot|Claude|ChatGPT|GPT):/i.test(trimmed)) {
+    return { speaker: null, text: trimmed.replace(/^(?:Assistant|AI|Bot|Claude|ChatGPT|GPT):\s*/i, ''), source: 'assistant' };
+  }
+  if (!SPEAKER_PREFIX_PATTERN.test(trimmed)) return null;
+  return {
+    speaker: trimmed.match(/^([A-Z][A-Za-z0-9' -]{1,40}):/)?.[1] ?? null,
+    text: trimmed,
+    source: 'user',
+  };
 }
 
 function pushTurn(
@@ -398,7 +411,7 @@ export function quickExtractFacts(conversationText: string): ExtractedFact[] {
   const seenFacts = new Set<string>();
 
   for (const turn of turns) {
-    extractFactsFromTurn(turn, sessionDate, sessionDateValue, seenFacts, facts);
+    extractFactsFromTurn(turn, conversationText, sessionDate, sessionDateValue, seenFacts, facts);
   }
 
   return enrichExtractedFacts(facts);
@@ -407,6 +420,7 @@ export function quickExtractFacts(conversationText: string): ExtractedFact[] {
 /** Extract facts from a single turn's sentences and add to the accumulator. */
 function extractFactsFromTurn(
   turn: { text: string; source: string; speaker: string | null },
+  contextText: string,
   sessionDate: string | null,
   sessionDateValue: Date | null,
   seenFacts: Set<string>,
@@ -420,7 +434,7 @@ function extractFactsFromTurn(
 
   for (const sentence of candidates) {
     const fact = processSentence(sentence, isAssistant, turn.speaker, sessionDate, sessionDateValue, seenFacts);
-    if (fact) facts.push(fact);
+    if (fact) facts.push(resolveContextualObjectReference(fact, contextText));
   }
 }
 
@@ -461,11 +475,34 @@ function applySpeakerSubject(sentence: string, speaker: string | null): string {
   if (!speaker) {
     return sentence;
   }
-  return sentence
+  const impliedSpeaker = sentence.replace(
+    /^(?:Appreciate[^,]{0,80},\s+but\s+)?had\b/i,
+    `${speaker} had`,
+  );
+  return impliedSpeaker
     .replace(/\bI['’]d\b/g, `${speaker} would`)
     .replace(/\bI['’]ll\b/g, `${speaker} will`)
     .replace(/\bI['’]ve\b/g, `${speaker} has`)
     .replace(/\bI['’]m\b/g, `${speaker} is`)
     .replace(/\bI\b/g, speaker)
     .replace(/\bmy\b/gi, `${speaker}'s`);
+}
+
+function resolveContextualObjectReference(fact: ExtractedFact, turnText: string): ExtractedFact {
+  if (!/\bhad them for\b/i.test(fact.fact)) {
+    return fact;
+  }
+  const object = findContextualObject(turnText);
+  if (!object) {
+    return fact;
+  }
+  return {
+    ...fact,
+    fact: fact.fact.replace(/\bhad them for\b/i, `had the ${object} for`),
+  };
+}
+
+function findContextualObject(text: string): string | null {
+  const match = text.match(/\b(turtles|snakes|dogs|cats|pets)\b/i);
+  return match ? match[1].toLowerCase() : null;
 }

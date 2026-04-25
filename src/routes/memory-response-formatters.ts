@@ -177,6 +177,9 @@ function formatRetrievalTrace(summary: RetrievalTraceSummary) {
     candidate_count: summary.candidateCount,
     query_text: summary.queryText,
     skip_repair: summary.skipRepair,
+    ...(summary.traceId ? { trace_id: summary.traceId } : {}),
+    ...(summary.stageCount !== undefined ? { stage_count: summary.stageCount } : {}),
+    ...(summary.stageNames ? { stage_names: summary.stageNames } : {}),
   };
 }
 

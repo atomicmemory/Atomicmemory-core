@@ -28,6 +28,10 @@ import type { RetrievalProfile } from '../services/retrieval-profiles.js';
 import { MemoryService } from '../services/memory-service.js';
 import { initEmbedding } from '../services/embedding.js';
 import { initLlm } from '../services/llm.js';
+import {
+  readRuntimeConfigRouteSnapshot,
+  type RuntimeConfigRouteSnapshot,
+} from './runtime-config-route-snapshot.js';
 
 /**
  * Explicit runtime configuration subset currently needed by the runtime
@@ -62,6 +66,11 @@ import { initLlm } from '../services/llm.js';
  */
 export interface CoreRuntimeConfig {
   adaptiveRetrievalEnabled: boolean;
+  adaptiveSimpleLimit: number;
+  adaptiveMediumLimit: number;
+  adaptiveComplexLimit: number;
+  adaptiveMultiHopLimit: number;
+  adaptiveAggregationLimit: number;
   agenticRetrievalEnabled: boolean;
   auditLoggingEnabled: boolean;
   consensusMinMemories: number;
@@ -79,6 +88,8 @@ export interface CoreRuntimeConfig {
   linkExpansionEnabled: boolean;
   linkExpansionMax: number;
   linkSimilarityThreshold: number;
+  literalListProtectionEnabled: boolean;
+  literalListProtectionMaxProtected: number;
   maxSearchResults: number;
   mmrEnabled: boolean;
   mmrLambda: number;
@@ -98,6 +109,8 @@ export interface CoreRuntimeConfig {
   rerankSkipMinGap: number;
   rerankSkipTopSimilarity: number;
   retrievalProfileSettings: RetrievalProfile;
+  temporalQueryConstraintBoost: number;
+  temporalQueryConstraintEnabled: boolean;
 }
 
 /** Repositories constructed by the runtime container. */
@@ -116,28 +129,7 @@ export interface CoreRuntimeServices {
 }
 
 export interface CoreRuntimeConfigRouteAdapter {
-  current: () => {
-    retrievalProfile: string;
-    embeddingProvider: import('../config.js').EmbeddingProviderName;
-    embeddingModel: string;
-    llmProvider: import('../config.js').LLMProviderName;
-    llmModel: string;
-    clarificationConflictThreshold: number;
-    maxSearchResults: number;
-    hybridSearchEnabled: boolean;
-    iterativeRetrievalEnabled: boolean;
-    entityGraphEnabled: boolean;
-    crossEncoderEnabled: boolean;
-    agenticRetrievalEnabled: boolean;
-    repairLoopEnabled: boolean;
-    /**
-     * Startup-validated flag for whether PUT /v1/memories/config should mutate
-     * runtime config. Production deploys leave this false; dev/test toggles
-     * it on via the CORE_RUNTIME_CONFIG_MUTATION_ENABLED env var. Routes
-     * read this snapshot — never re-check env at request time.
-     */
-    runtimeConfigMutationEnabled: boolean;
-  };
+  current: () => RuntimeConfigRouteSnapshot;
   update: (updates: {
     similarityThreshold?: number;
     audnCandidateThreshold?: number;
@@ -224,22 +216,7 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     config,
     configRouteAdapter: {
       current() {
-        return {
-          retrievalProfile: config.retrievalProfile,
-          embeddingProvider: config.embeddingProvider,
-          embeddingModel: config.embeddingModel,
-          llmProvider: config.llmProvider,
-          llmModel: config.llmModel,
-          clarificationConflictThreshold: config.clarificationConflictThreshold,
-          maxSearchResults: config.maxSearchResults,
-          hybridSearchEnabled: config.hybridSearchEnabled,
-          iterativeRetrievalEnabled: config.iterativeRetrievalEnabled,
-          entityGraphEnabled: config.entityGraphEnabled,
-          crossEncoderEnabled: config.crossEncoderEnabled,
-          agenticRetrievalEnabled: config.agenticRetrievalEnabled,
-          repairLoopEnabled: config.repairLoopEnabled,
-          runtimeConfigMutationEnabled: config.runtimeConfigMutationEnabled,
-        };
+        return readRuntimeConfigRouteSnapshot(config);
       },
       update(updates) {
         return updateRuntimeConfig(updates);

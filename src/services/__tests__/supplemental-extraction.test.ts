@@ -118,4 +118,19 @@ describe('mergeSupplementalFacts', () => {
     expect(merged.some((fact) => fact.fact.includes('analytics tools'))).toBe(true);
     expect(merged.some((fact) => fact.fact.includes('social media accounts'))).toBe(true);
   });
+
+  it('keeps LoCoMo temporal duration and doctor facts without named entities', () => {
+    const merged = mergeSupplementalFacts(
+      [],
+      [
+        '[Session date: 2023-05-24]',
+        'Nate: I like having some of these little turtles around to keep me calm.',
+        "Nate: I've had them for 3 years now and they bring me tons of joy!",
+        "Sam: Thanks, Evan. Appreciate the offer, but had a check-up with my doctor a few days ago and, yikes, the weight wasn't great.",
+      ].join('\n'),
+    );
+
+    expect(merged.some((fact) => fact.fact.includes('Nate has had the turtles for 3 years now'))).toBe(true);
+    expect(merged.some((fact) => fact.fact.includes('Sam had a check-up with Sam\'s doctor a few days ago'))).toBe(true);
+  });
 });

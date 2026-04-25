@@ -13,6 +13,7 @@ import {
   extractFacts,
   resolveAUDN,
   type AUDNDecision,
+  type ExtractionOptions,
   type ExtractedFact,
   type ExistingMemory,
 } from './extraction.js';
@@ -38,15 +39,18 @@ function writeCache<T>(filePath: string, value: T): void {
   renameSync(tmpPath, filePath);
 }
 
-export async function cachedExtractFacts(conversationText: string): Promise<ExtractedFact[]> {
-  if (!config.extractionCacheEnabled) return extractFacts(conversationText);
+export async function cachedExtractFacts(
+  conversationText: string,
+  options: ExtractionOptions = {},
+): Promise<ExtractedFact[]> {
+  if (!config.extractionCacheEnabled) return extractFacts(conversationText, options);
 
-  const key = `extract-${hashInput([conversationText])}`;
+  const key = `extract-${hashInput([conversationText, JSON.stringify(options)])}`;
   const filePath = cacheFilePath(key);
   const cached = readCache<ExtractedFact[]>(filePath);
   if (cached) return cached;
 
-  const result = await extractFacts(conversationText);
+  const result = await extractFacts(conversationText, options);
   writeCache(filePath, result);
   return result;
 }

@@ -2558,6 +2558,14 @@ paths:
                             type: string
                           skip_repair:
                             type: boolean
+                          stage_count:
+                            type: number
+                          stage_names:
+                            items:
+                              type: string
+                            type: array
+                          trace_id:
+                            type: string
                         required:
                           - candidate_ids
                           - candidate_count
@@ -2906,6 +2914,14 @@ paths:
                             type: string
                           skip_repair:
                             type: boolean
+                          stage_count:
+                            type: number
+                          stage_names:
+                            items:
+                              type: string
+                            type: array
+                          trace_id:
+                            type: string
                         required:
                           - candidate_ids
                           - candidate_count

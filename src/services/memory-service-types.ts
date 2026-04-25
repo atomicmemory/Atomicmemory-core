@@ -205,6 +205,8 @@ export interface IngestRuntimeConfig {
   compositeMinClusterSize: number;
   consensusExtractionEnabled: boolean;
   consensusExtractionRuns: number;
+  observationDateExtractionEnabled: boolean;
+  quotedEntityExtractionEnabled: boolean;
   entityGraphEnabled: boolean;
   entropyGateAlpha: number;
   entropyGateEnabled: boolean;

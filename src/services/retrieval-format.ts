@@ -11,7 +11,11 @@
 import { config } from '../config.js';
 import type { SearchResult } from '../db/memory-repository.js';
 import type { ContextTier, TierAssignment } from './tiered-loading.js';
-import { assignTiers as assignTierBudgets, getContentAtTier } from './tiered-loading.js';
+import {
+  assignTiers as assignTierBudgets,
+  estimateTokens,
+  getContentAtTier,
+} from './tiered-loading.js';
 import { isAnswerBearing, sortBySessionPriority } from './session-packaging.js';
 import { deduplicateCompositeMembersHard } from './composite-dedup.js';
 import { prefersAbstractAwareRetrieval } from './abstract-query-policy.js';
@@ -181,8 +185,12 @@ function buildTemporalSummary(sortedMemories: SearchResult[]): string {
   const last = uniqueDates[uniqueDates.length - 1];
   const totalDays = Math.round((last.getTime() - first.getTime()) / 86400000);
   const totalLine = `Total span: ${formatDateLabel(first)} to ${formatDateLabel(last)} (${formatDuration(totalDays)})`;
+  const evidenceLines = buildTemporalEvidenceLines(sortedMemories, uniqueDates);
+  const evidenceBlock = evidenceLines.length > 0
+    ? `\nKey temporal evidence:\n${evidenceLines.join('\n')}`
+    : '';
 
-  return `Timeline:\n${gaps.join('\n')}\n${totalLine}`;
+  return `Timeline:\n${gaps.join('\n')}\n${totalLine}${evidenceBlock}`;
 }
 
 function getUniqueDates(memories: SearchResult[]): Date[] {
@@ -208,6 +216,30 @@ function formatDuration(days: number): string {
   if (days < 30) return `~${weeks} week${weeks !== 1 ? 's' : ''} (${days} days)`;
   const months = Math.round(days / 30);
   return `~${months} month${months !== 1 ? 's' : ''} (${days} days)`;
+}
+
+function buildTemporalEvidenceLines(
+  memories: SearchResult[],
+  dates: Date[],
+): string[] {
+  return dates
+    .slice(0, 4)
+    .map((date) => buildTemporalEvidenceLine(memories, date))
+    .filter((line): line is string => line !== null);
+}
+
+function buildTemporalEvidenceLine(memories: SearchResult[], date: Date): string | null {
+  const key = formatDateLabel(date);
+  const sameDate = memories.filter((memory) => formatDateLabel(memory.created_at) === key);
+  const selected = sameDate.find((memory) => isAnswerBearing(memory.content)) ?? sameDate[0];
+  if (!selected) return null;
+  return `- ${key}: ${truncateTemporalEvidence(selected.content)}`;
+}
+
+function truncateTemporalEvidence(content: string): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 180) return normalized;
+  return `${normalized.slice(0, 177)}...`;
 }
 
 export function formatInjection(
@@ -291,8 +323,10 @@ export function formatTieredInjection(
     .filter((a) => a.tier !== 'L2')
     .map((a) => a.memoryId)
     .join(',');
-  if (!expandableIds) return lines.join('\n');
-  return `${lines.join('\n')}\nExpandable IDs: ${expandableIds}`;
+  const sections = expandableIds
+    ? [lines.join('\n'), `Expandable IDs: ${expandableIds}`]
+    : [lines.join('\n')];
+  return appendTemporalSummary(sections, memories);
 }
 
 function formatTieredLine(memory: SearchResult, tier: ContextTier): string {
@@ -312,6 +346,11 @@ function formatAge(date: Date): string {
 }
 
 const DEFAULT_INJECTION_TOKEN_BUDGET = 2000;
+const QUERY_TERM_MIN_LENGTH = 4;
+const QUERY_TERM_STOP_WORDS = new Set([
+  'what', 'when', 'where', 'which', 'with', 'from', 'that', 'this',
+  'recently', 'attend', 'attended', 'does', 'have', 'has', 'did',
+]);
 
 export interface InjectionBuildResult {
   injectionText: string;
@@ -344,14 +383,73 @@ export function buildInjection(
   const forceRichTopHit = prefersAbstractAwareRetrieval(mode, query);
 
   const result = assignTierBudgets(deduplicated, budget, { forceRichTopHit });
-  const expandIds = result.assignments
+  const assignments = preserveQueryTermVisibility(deduplicated, result.assignments, query, budget);
+  const expandIds = assignments
     .filter((a) => a.tier !== 'L2')
     .map((a) => a.memoryId);
 
   return {
-    injectionText: formatTieredInjection(deduplicated, result.assignments),
-    tierAssignments: result.assignments,
+    injectionText: formatTieredInjection(deduplicated, assignments),
+    tierAssignments: assignments,
     expandIds: expandIds.length > 0 ? expandIds : undefined,
-    estimatedContextTokens: result.totalTokens,
+    estimatedContextTokens: sumAssignmentTokens(assignments),
   };
+}
+
+function preserveQueryTermVisibility(
+  memories: SearchResult[],
+  assignments: TierAssignment[],
+  query: string,
+  tokenBudget: number,
+): TierAssignment[] {
+  const terms = extractQueryVisibilityTerms(query);
+  if (terms.length === 0) return assignments;
+
+  const nextAssignments = assignments.map((assignment) => ({ ...assignment }));
+  let remaining = tokenBudget - sumAssignmentTokens(nextAssignments);
+  for (const memory of memories) {
+    const index = nextAssignments.findIndex((assignment) => assignment.memoryId === memory.id);
+    if (index === -1 || nextAssignments[index].tier === 'L2') continue;
+    const upgraded = chooseVisibleTier(memory, nextAssignments[index], terms, remaining);
+    if (!upgraded) continue;
+    remaining -= upgraded.estimatedTokens - nextAssignments[index].estimatedTokens;
+    nextAssignments[index] = upgraded;
+  }
+  return nextAssignments;
+}
+
+function chooseVisibleTier(
+  memory: SearchResult,
+  assignment: TierAssignment,
+  terms: string[],
+  remainingBudget: number,
+): TierAssignment | null {
+  const current = getContentAtTier(memory, assignment.tier).toLowerCase();
+  const missingTerms = terms.filter((term) => !current.includes(term) && memory.content.toLowerCase().includes(term));
+  if (missingTerms.length === 0) return null;
+
+  for (const tier of ['L1', 'L2'] as const) {
+    const content = getContentAtTier(memory, tier).toLowerCase();
+    const revealsTerm = missingTerms.some((term) => content.includes(term));
+    const tokens = estimateTokens(content);
+    const extra = tokens - assignment.estimatedTokens;
+    if (revealsTerm && extra <= remainingBudget) {
+      return { memoryId: memory.id, tier, estimatedTokens: tokens };
+    }
+  }
+  return null;
+}
+
+function extractQueryVisibilityTerms(query: string): string[] {
+  const terms = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((term) => term.length >= QUERY_TERM_MIN_LENGTH)
+    .filter((term) => !QUERY_TERM_STOP_WORDS.has(term));
+  return [...new Set(terms)];
+}
+
+function sumAssignmentTokens(assignments: Array<{ estimatedTokens: number }>): number {
+  return assignments.reduce((sum, assignment) => sum + assignment.estimatedTokens, 0);
 }

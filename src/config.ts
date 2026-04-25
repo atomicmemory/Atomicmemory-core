@@ -29,6 +29,11 @@ export interface RuntimeConfig {
   crossAgentCandidateThreshold: number;
   clarificationConflictThreshold: number;
   adaptiveRetrievalEnabled: boolean;
+  adaptiveSimpleLimit: number;
+  adaptiveMediumLimit: number;
+  adaptiveComplexLimit: number;
+  adaptiveMultiHopLimit: number;
+  adaptiveAggregationLimit: number;
   repairLoopEnabled: boolean;
   hybridSearchEnabled: boolean;
   repairLoopMinSimilarity: number;
@@ -70,6 +75,8 @@ export interface RuntimeConfig {
   chunkOverlapTurns: number;
   consensusExtractionEnabled: boolean;
   consensusExtractionRuns: number;
+  observationDateExtractionEnabled: boolean;
+  quotedEntityExtractionEnabled: boolean;
   entropyGateEnabled: boolean;
   entropyGateThreshold: number;
   entropyGateAlpha: number;
@@ -110,6 +117,10 @@ export interface RuntimeConfig {
   agenticRetrievalEnabled: boolean;
   rerankSkipTopSimilarity: number;
   rerankSkipMinGap: number;
+  literalListProtectionEnabled: boolean;
+  literalListProtectionMaxProtected: number;
+  temporalQueryConstraintEnabled: boolean;
+  temporalQueryConstraintBoost: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -201,6 +212,16 @@ function parseLlmSeed(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = optionalEnv(name);
+  if (!raw) return fallback;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
 function parseVectorBackend(value: string | undefined): VectorBackendName {
   if (!value) return 'pgvector';
   if (value === 'pgvector' || value === 'ruvector-mock' || value === 'zvec-mock') return value;
@@ -235,6 +256,11 @@ export const config: RuntimeConfig = {
   crossAgentCandidateThreshold: parseFloat(optionalEnv('CROSS_AGENT_CANDIDATE_THRESHOLD') ?? '0.75'),
   clarificationConflictThreshold: 0.8,
   adaptiveRetrievalEnabled: (process.env.ADAPTIVE_RETRIEVAL_ENABLED ?? String(retrievalProfileSettings.adaptiveRetrievalEnabled)) === 'true',
+  adaptiveSimpleLimit: parsePositiveIntEnv('ADAPTIVE_SIMPLE_LIMIT', 5),
+  adaptiveMediumLimit: parsePositiveIntEnv('ADAPTIVE_MEDIUM_LIMIT', 5),
+  adaptiveComplexLimit: parsePositiveIntEnv('ADAPTIVE_COMPLEX_LIMIT', 8),
+  adaptiveMultiHopLimit: parsePositiveIntEnv('ADAPTIVE_MULTI_HOP_LIMIT', 12),
+  adaptiveAggregationLimit: parsePositiveIntEnv('ADAPTIVE_AGGREGATION_LIMIT', 25),
   repairLoopEnabled: (process.env.REPAIR_LOOP_ENABLED ?? String(retrievalProfileSettings.repairLoopEnabled)) === 'true',
   hybridSearchEnabled: (process.env.HYBRID_SEARCH_ENABLED ?? String(retrievalProfileSettings.hybridSearchEnabled)) === 'true',
   repairLoopMinSimilarity: parseFloat(process.env.REPAIR_LOOP_MIN_SIMILARITY ?? String(retrievalProfileSettings.repairLoopMinSimilarity)),
@@ -286,6 +312,8 @@ export const config: RuntimeConfig = {
   chunkOverlapTurns: parseInt(optionalEnv('CHUNK_OVERLAP_TURNS') ?? '1', 10),
   consensusExtractionEnabled: (optionalEnv('CONSENSUS_EXTRACTION_ENABLED') ?? 'false') === 'true',
   consensusExtractionRuns: parseInt(optionalEnv('CONSENSUS_EXTRACTION_RUNS') ?? '3', 10),
+  observationDateExtractionEnabled: (optionalEnv('OBSERVATION_DATE_EXTRACTION_ENABLED') ?? 'false') === 'true',
+  quotedEntityExtractionEnabled: (optionalEnv('QUOTED_ENTITY_EXTRACTION_ENABLED') ?? 'false') === 'true',
   entropyGateEnabled: (optionalEnv('ENTROPY_GATE_ENABLED') ?? 'false') === 'true',
   entropyGateThreshold: parseFloat(optionalEnv('ENTROPY_GATE_THRESHOLD') ?? '0.35'),
   entropyGateAlpha: parseFloat(optionalEnv('ENTROPY_GATE_ALPHA') ?? '0.5'),
@@ -326,6 +354,10 @@ export const config: RuntimeConfig = {
   agenticRetrievalEnabled: (optionalEnv('AGENTIC_RETRIEVAL_ENABLED') ?? 'false') === 'true',
   rerankSkipTopSimilarity: parseFloat(optionalEnv('RERANK_SKIP_TOP_SIMILARITY') ?? '0.85'),
   rerankSkipMinGap: parseFloat(optionalEnv('RERANK_SKIP_MIN_GAP') ?? '0.05'),
+  literalListProtectionEnabled: (optionalEnv('LITERAL_LIST_PROTECTION_ENABLED') ?? 'false') === 'true',
+  literalListProtectionMaxProtected: parsePositiveIntEnv('LITERAL_LIST_PROTECTION_MAX_PROTECTED', 3),
+  temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
+  temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -413,6 +445,9 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   // Repair loop tuning
   'repairLoopMinSimilarity', 'repairSkipSimilarity',
   'repairDeltaThreshold', 'repairConfidenceFloor',
+  // Adaptive retrieval tuning
+  'adaptiveSimpleLimit', 'adaptiveMediumLimit', 'adaptiveComplexLimit',
+  'adaptiveMultiHopLimit', 'adaptiveAggregationLimit',
   // MMR
   'mmrEnabled', 'mmrLambda',
   // Link expansion
@@ -428,6 +463,7 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'extractionCacheEnabled', 'embeddingCacheEnabled',
   'chunkedExtractionEnabled', 'chunkSizeTurns', 'chunkOverlapTurns',
   'consensusExtractionEnabled', 'consensusExtractionRuns',
+  'observationDateExtractionEnabled', 'quotedEntityExtractionEnabled',
   'entropyGateEnabled', 'entropyGateThreshold', 'entropyGateAlpha',
   // Affinity clustering
   'affinityClusteringThreshold', 'affinityClusteringMinSize',
@@ -449,6 +485,10 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'queryAugmentationMinSimilarity',
   // Rerank tuning
   'rerankSkipTopSimilarity', 'rerankSkipMinGap',
+  // Literal/list answer selection
+  'literalListProtectionEnabled', 'literalListProtectionMaxProtected',
+  // Temporal query selection
+  'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred

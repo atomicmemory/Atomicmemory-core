@@ -3802,6 +3802,18 @@
                             },
                             "skip_repair": {
                               "type": "boolean"
+                            },
+                            "stage_count": {
+                              "type": "number"
+                            },
+                            "stage_names": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "trace_id": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -4316,6 +4328,18 @@
                             },
                             "skip_repair": {
                               "type": "boolean"
+                            },
+                            "stage_count": {
+                              "type": "number"
+                            },
+                            "stage_names": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "trace_id": {
+                              "type": "string"
                             }
                           },
                           "required": [

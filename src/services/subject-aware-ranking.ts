@@ -8,6 +8,7 @@ import type { SearchResult } from '../db/repository-types.js';
 import type { SearchStore } from '../db/stores.js';
 import { buildTemporalFingerprint } from './temporal-fingerprint.js';
 import { fetchAndBoostKeywordCandidates } from './keyword-expansion.js';
+import { countKeywordMatches } from './query-keyword-matches.js';
 
 const MONTH_NAMES = new Set([
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -148,11 +149,6 @@ function extractQueryCandidates(query: string): string[] {
     const isPartOfTitleCasePhrase = previousLooksNamed || nextLooksNamed;
     return !isPartOfTitleCasePhrase;
   });
-}
-
-function countKeywordMatches(content: string, keywords: string[]): number {
-  const lower = content.toLowerCase();
-  return keywords.filter((keyword) => lower.includes(keyword)).length;
 }
 
 function buildProtectedFingerprints(scoredResults: ScoredSubjectCandidate[]): string[] {

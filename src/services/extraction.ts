@@ -12,6 +12,16 @@ import { timed, timedSync } from './timing.js';
 import { normalizeExtractedFacts } from './fact-normalization.js';
 import { enrichExtractedFacts } from './extraction-enrichment.js';
 import { mergeSupplementalFacts } from './supplemental-extraction.js';
+import {
+  applyObservationDateAnchors,
+  buildExtractionUserMessage,
+  type ExtractionOptions,
+} from './observation-date-extraction.js';
+
+const EXTRACTION_MAX_TOKENS = 4096;
+const AUDN_MAX_TOKENS = 2048;
+
+export type { ExtractionOptions };
 
 /** Strip markdown code fences (```json ... ```) that some LLMs wrap around JSON output. */
 function stripJsonFences(raw: string): string {
@@ -30,27 +40,85 @@ function stripJsonFences(raw: string): string {
   return trimmed;
 }
 
+/** Return the first complete JSON object, tolerating prose before/after it. */
+function extractFirstJsonObject(raw: string): string {
+  const cleaned = stripJsonFences(raw);
+  if (isValidJson(cleaned)) return cleaned;
+
+  const start = cleaned.indexOf('{');
+  if (start < 0) return cleaned;
+
+  const end = findBalancedJsonObjectEnd(cleaned, start);
+  return end < 0 ? cleaned : cleaned.slice(start, end + 1);
+}
+
+function isValidJson(value: string): boolean {
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+interface JsonScanState {
+  depth: number;
+  inString: boolean;
+  escaped: boolean;
+}
+
+function findBalancedJsonObjectEnd(input: string, start: number): number {
+  const state: JsonScanState = { depth: 0, inString: false, escaped: false };
+  for (let i = start; i < input.length; i++) {
+    if (advanceJsonScanState(state, input[i]!)) return i;
+  }
+  return -1;
+}
+
+function advanceJsonScanState(state: JsonScanState, char: string): boolean {
+  if (state.escaped) {
+    state.escaped = false;
+    return false;
+  }
+  if (char === '\\') {
+    state.escaped = state.inString;
+    return false;
+  }
+  if (char === '"') {
+    state.inString = !state.inString;
+    return false;
+  }
+  if (state.inString) return false;
+  return updateJsonDepth(state, char);
+}
+
+function updateJsonDepth(state: JsonScanState, char: string): boolean {
+  if (char === '{') state.depth++;
+  if (char === '}') state.depth--;
+  return state.depth === 0;
+}
+
 /**
  * Attempts to recover a valid JSON object from truncated LLM output.
  * Finds the last complete object boundary, closes unterminated strings/arrays/objects,
  * and wraps in the expected `{"memories": [...]}` structure if needed.
  */
 function repairTruncatedJson(raw: string): string | null {
-  // Find last complete JSON object (closing brace that isn't mid-string)
   const lastBrace = raw.lastIndexOf('}');
   if (lastBrace <= 0) return null;
 
-  let candidate = raw.slice(0, lastBrace + 1);
-  // Remove trailing commas before ] or }
-  candidate = candidate.replace(/,\s*\]/, ']').replace(/,\s*\}/, '}');
+  const candidate = removeTrailingJsonCommas(raw.slice(0, lastBrace + 1));
+  if (isValidJson(candidate)) return candidate;
 
-  try {
-    JSON.parse(candidate);
-    return candidate;
-  } catch {
-    // Truncation may leave unterminated strings — try closing them
-  }
+  const repaired = closeAtLastCompleteArrayEntry(candidate);
+  return repaired && isValidJson(repaired) ? repaired : null;
+}
 
+function removeTrailingJsonCommas(value: string): string {
+  return value.replace(/,\s*\]/, ']').replace(/,\s*\}/, '}');
+}
+
+function closeAtLastCompleteArrayEntry(candidate: string): string | null {
   // Walk backwards to find the last complete array entry boundary
   // Look for `},` or `}]` patterns that mark a complete object in the memories array
   const lastCompleteEntry = candidate.lastIndexOf('},');
@@ -58,20 +126,17 @@ function repairTruncatedJson(raw: string): string | null {
   const cutPoint = Math.max(lastCompleteEntry, lastArrayClose);
   if (cutPoint <= 0) return null;
 
-  // Slice up to and including the last complete entry, then close the structure
-  let truncated = candidate.slice(0, cutPoint + 1);
-  // Close any open arrays and objects
-  const openBrackets = (truncated.match(/\[/g) || []).length - (truncated.match(/\]/g) || []).length;
-  const openBraces = (truncated.match(/\{/g) || []).length - (truncated.match(/\}/g) || []).length;
-  for (let i = 0; i < openBrackets; i++) truncated += ']';
-  for (let i = 0; i < openBraces; i++) truncated += '}';
+  return closeOpenJsonContainers(candidate.slice(0, cutPoint + 1));
+}
 
-  try {
-    JSON.parse(truncated);
-    return truncated;
-  } catch {
-    return null;
-  }
+function closeOpenJsonContainers(value: string): string {
+  const openBrackets = Math.max(0, countMatches(value, '[') - countMatches(value, ']'));
+  const openBraces = Math.max(0, countMatches(value, '{') - countMatches(value, '}'));
+  return value + ']'.repeat(openBrackets) + '}'.repeat(openBraces);
+}
+
+function countMatches(value: string, char: string): number {
+  return [...value].filter((candidate) => candidate === char).length;
 }
 
 export interface ExtractedEntity {
@@ -235,13 +300,16 @@ OUTPUT FORMAT (JSON):
 
 If no extractable facts exist, return: {"memories": []}`;
 
-export async function extractFacts(conversationText: string): Promise<ExtractedFact[]> {
+export async function extractFacts(
+  conversationText: string,
+  options: ExtractionOptions = {},
+): Promise<ExtractedFact[]> {
   const content = await timed('ingest.extract.llm', () => withCostStage('extract', () => llm.chat(
     [
       { role: 'system', content: EXTRACTION_PROMPT },
-      { role: 'user', content: `Conversation to extract from:\n${conversationText}` },
+      { role: 'user', content: buildExtractionUserMessage(conversationText, options) },
     ],
-    { temperature: 0, jsonMode: true },
+    { temperature: 0, jsonMode: true, maxTokens: EXTRACTION_MAX_TOKENS },
   )));
 
   if (!content) return [];
@@ -251,7 +319,8 @@ export async function extractFacts(conversationText: string): Promise<ExtractedF
 
   return timedSync('ingest.extract.post-process', () => {
     const normalized: ExtractedFact[] = rawFacts.map((m) => normalizeRawFact(m));
-    const baseFacts = enrichExtractedFacts(normalizeExtractedFacts(normalized));
+    const anchoredFacts = applyObservationDateAnchors(normalized, conversationText, options);
+    const baseFacts = enrichExtractedFacts(normalizeExtractedFacts(anchoredFacts));
     return mergeSupplementalFacts(baseFacts, conversationText);
   });
 }
@@ -458,6 +527,8 @@ OUTPUT FORMAT (JSON):
   "clarification_note": null | "description of the conflict for CLARIFY action",
   "contradiction_confidence": null | 0.0-1.0
 }
+
+Return only the JSON object. Do not wrap it in markdown fences. Do not explain your reasoning.
 `;
 
 export async function resolveAUDN(
@@ -473,14 +544,14 @@ export async function resolveAUDN(
       { role: 'system', content: AUDN_PROMPT },
       { role: 'user', content: `NEW FACT: ${newFact}\n\nEXISTING MEMORIES:\n${memoriesBlock}` },
     ],
-    { temperature: 0, jsonMode: true },
+    { temperature: 0, jsonMode: true, maxTokens: AUDN_MAX_TOKENS },
   );
 
   if (!content) {
     return defaultDecision();
   }
 
-  const cleanedAudn = stripJsonFences(content);
+  const cleanedAudn = extractFirstJsonObject(content);
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(cleanedAudn) as Record<string, unknown>;
@@ -674,4 +745,3 @@ export function generateFallbackHeadline(fact: string): string {
   if (words.length <= HEADLINE_MAX_WORDS) return fact;
   return words.slice(0, HEADLINE_MAX_WORDS).join(' ') + '...';
 }
-

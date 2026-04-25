@@ -12,6 +12,17 @@ const COMPLEX_QUERY_LIMIT = 8;
 const MULTI_HOP_QUERY_LIMIT = 12;
 export const AGGREGATION_QUERY_LIMIT = 25;
 
+type AdaptiveLimitConfig = Pick<
+  CoreRuntimeConfig,
+  | 'adaptiveRetrievalEnabled'
+  | 'maxSearchResults'
+  | 'adaptiveSimpleLimit'
+  | 'adaptiveMediumLimit'
+  | 'adaptiveComplexLimit'
+  | 'adaptiveMultiHopLimit'
+  | 'adaptiveAggregationLimit'
+>;
+
 /** Hard ceiling for aggregation queries (prevents runaway candidate pools). */
 const AGGREGATION_HARD_CAP = 50;
 
@@ -64,7 +75,7 @@ export interface ResolvedLimit {
 export function resolveSearchLimit(
   query: string,
   requestedLimit: number | undefined,
-  runtimeConfig: Pick<CoreRuntimeConfig, 'adaptiveRetrievalEnabled' | 'maxSearchResults'>,
+  runtimeConfig: AdaptiveLimitConfig,
 ): number {
   return resolveSearchLimitDetailed(query, requestedLimit, runtimeConfig).limit;
 }
@@ -72,7 +83,7 @@ export function resolveSearchLimit(
 export function resolveSearchLimitDetailed(
   query: string,
   requestedLimit: number | undefined,
-  runtimeConfig: Pick<CoreRuntimeConfig, 'adaptiveRetrievalEnabled' | 'maxSearchResults'>,
+  runtimeConfig: AdaptiveLimitConfig,
 ): ResolvedLimit {
   if (requestedLimit !== undefined) {
     return { limit: clampLimit(requestedLimit, runtimeConfig.maxSearchResults), classification: { limit: requestedLimit, label: 'medium' } };
@@ -80,7 +91,7 @@ export function resolveSearchLimitDetailed(
   if (!runtimeConfig.adaptiveRetrievalEnabled) {
     return { limit: clampLimit(runtimeConfig.maxSearchResults, runtimeConfig.maxSearchResults), classification: { limit: runtimeConfig.maxSearchResults, label: 'medium' } };
   }
-  const classification = classifyQueryDetailed(query);
+  const classification = applyConfiguredLimit(classifyQueryDetailed(query), runtimeConfig);
   // Aggregation queries bypass the normal maxSearchResults clamp to improve
   // recall for count/sum/list-all questions spanning many sessions.
   const limit = classification.label === 'aggregation'
@@ -92,7 +103,7 @@ export function resolveSearchLimitDetailed(
 export function shouldRunRepairLoop(
   query: string,
   memories: SearchResult[],
-  runtimeConfig: Pick<CoreRuntimeConfig, 'repairLoopEnabled' | 'repairLoopMinSimilarity' | 'adaptiveRetrievalEnabled' | 'maxSearchResults'>,
+  runtimeConfig: Pick<CoreRuntimeConfig, 'repairLoopEnabled' | 'repairLoopMinSimilarity'> & AdaptiveLimitConfig,
 ): boolean {
   if (!runtimeConfig.repairLoopEnabled) return false;
   // Selective repair: only escalate queries where the rewrite improves retrieval.
@@ -184,6 +195,20 @@ export interface QueryClassification {
   label: QueryComplexityLabel;
   /** The marker that triggered a multi-hop or aggregation classification, if any. */
   matchedMarker?: string;
+}
+
+function applyConfiguredLimit(
+  classification: QueryClassification,
+  runtimeConfig: AdaptiveLimitConfig,
+): QueryClassification {
+  const limits: Record<QueryComplexityLabel, number> = {
+    simple: runtimeConfig.adaptiveSimpleLimit,
+    medium: runtimeConfig.adaptiveMediumLimit,
+    complex: runtimeConfig.adaptiveComplexLimit,
+    'multi-hop': runtimeConfig.adaptiveMultiHopLimit,
+    aggregation: runtimeConfig.adaptiveAggregationLimit,
+  };
+  return { ...classification, limit: limits[classification.label] };
 }
 
 function classifyQueryComplexity(query: string): number {

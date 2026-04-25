@@ -66,7 +66,16 @@ export async function runPostWriteProcessors(
   let compositesCreated = 0;
   if (ctx.compositesEnabled && ctx.storedFacts.length >= deps.config.compositeMinClusterSize) {
     compositesCreated = await timed(`${ctx.timingPrefix}.composites`, () =>
-      generateAndStoreComposites(deps, userId, ctx.storedFacts, ctx.embeddingCache, ctx.sourceSite, ctx.sourceUrl, ctx.episodeId),
+      generateAndStoreComposites(
+        deps,
+        userId,
+        ctx.storedFacts,
+        ctx.embeddingCache,
+        ctx.sourceSite,
+        ctx.sourceUrl,
+        ctx.episodeId,
+        ctx.sessionTimestamp,
+      ),
     );
   }
 
@@ -82,6 +91,7 @@ async function generateAndStoreComposites(
   sourceSite: string,
   sourceUrl: string,
   episodeId: string,
+  sessionTimestamp?: Date,
 ): Promise<number> {
   const memberNamespaceMap = new Map<string, string | null>();
   const compositeInputs: CompositeInput[] = storedFacts
@@ -117,6 +127,7 @@ async function generateAndStoreComposites(
       summary: composite.headline,
       overview: composite.overview,
       trustScore: 1.0,
+      createdAt: sessionTimestamp,
       namespace: namespace ?? undefined,
       metadata: {
         memberMemoryIds: composite.memberMemoryIds,

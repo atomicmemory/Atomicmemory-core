@@ -20,10 +20,10 @@ export const ENTITY_PATTERNS: Array<{ pattern: RegExp; type: ExtractedEntity['ty
 export const QUOTED_TEXT_PATTERN = /["""][^"""]{2,}["""]/;
 
 export const LITERAL_DETAIL_PATTERN =
-  /\b(?:necklace|book|books|song|songs|music|musicians|fan|painting|paintings|photo|poster|posters|library|store|decor|furniture|flooring|pet|pets|cat|cats|dog|dogs|guinea pig|workshop|poetry reading|sign|slipper|bowl)\b/i;
+  /\b(?:necklace|book|books|song|songs|music|musicians|fan|painting|paintings|photo|poster|posters|library|store|decor|furniture|flooring|pet|pets|cat|cats|dog|dogs|guinea pig|turtle|turtles|snake|snakes|workshop|poetry reading|sign|slipper|bowl)\b/i;
 
 export const EVENT_DETAIL_PATTERN =
-  /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf|trip|paris|rome)\b/i;
+  /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf|trip|travel(?:ed|ling)?|retreat|phuket|doctor|doc|check-up|appointment|blog|car mods?|restor(?:e|ed|ing|ation)|paris|rome)\b/i;
 
 /** Check whether text contains any known entity pattern. */
 export function hasStandaloneEntity(sentence: string): boolean {

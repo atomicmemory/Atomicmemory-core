@@ -51,7 +51,7 @@ describe('cachedExtractFacts', () => {
     const result = await cachedExtractFacts('some conversation');
 
     expect(mockExtractFacts).toHaveBeenCalledOnce();
-    expect(mockExtractFacts).toHaveBeenCalledWith('some conversation');
+    expect(mockExtractFacts).toHaveBeenCalledWith('some conversation', {});
     expect(result).toEqual(SAMPLE_FACTS);
   });
 

@@ -13,34 +13,14 @@
  */
 
 import { z } from './zod-setup';
-
-/**
- * ISO date-time string on the wire. Accepts `Date` at validation time
- * so `validateResponse` middleware can run before Express serializes
- * the body — Express's JSON.stringify converts Date → ISO string,
- * matching the outer `z.string()` the OpenAPI spec documents.
- */
-const IsoDateString = z.preprocess(
-  (v) => (v instanceof Date ? v.toISOString() : v),
-  z.string(),
-);
-
-/** Same pattern but nullable (schema exports nullable string). */
-const IsoDateStringOrNull = z.preprocess(
-  (v) => (v instanceof Date ? v.toISOString() : v),
-  z.string().nullable(),
-);
-
-/**
- * Float that may be NaN on the JS side. `JSON.stringify(NaN)` emits
- * `null`, so the wire shape is `number | null` — the schema reflects
- * that, and the preprocess converts NaN so the validator (which runs
- * before serialization) matches.
- */
-const NumberOrNaN = z.preprocess(
-  (v) => (typeof v === 'number' && Number.isNaN(v) ? null : v),
-  z.number().nullable(),
-);
+import { IsoDateString, IsoDateStringOrNull } from './response-scalars.js';
+import {
+  ConsensusResponseSchema,
+  LessonCheckSchema,
+  ObservabilityResponseSchema,
+  SearchMemoryItemSchema,
+  TierAssignmentSchema,
+} from './search-response-parts.js';
 
 // ---------------------------------------------------------------------------
 // Shared sub-schemas
@@ -87,69 +67,6 @@ const MemoryRowSchema = z.object({
   agent_id: z.string().nullable().optional(),
   visibility: z.enum(['agent_only', 'restricted', 'workspace']).nullable().optional(),
 }).passthrough().openapi({ description: 'Full memory row as emitted by core.' });
-
-const SearchMemoryItemSchema = z.object({
-  id: z.string(),
-  content: z.string(),
-  similarity: NumberOrNaN.optional(),
-  score: NumberOrNaN.optional(),
-  importance: NumberOrNaN.optional(),
-  source_site: z.string().optional(),
-  created_at: IsoDateString.optional(),
-}).openapi({ description: 'Projected memory record in a search result.' });
-
-const TierAssignmentSchema = z.object({
-  memory_id: z.string(),
-  tier: z.string(),
-  estimated_tokens: z.number(),
-});
-
-const LessonCheckSchema = z.object({
-  safe: z.boolean(),
-  warnings: z.array(z.unknown()),
-  highest_severity: z.string(),
-  matched_count: z.number(),
-});
-
-const ConsensusResponseSchema = z.object({
-  original_count: z.number(),
-  filtered_count: z.number(),
-  removed_count: z.number(),
-  removed_memory_ids: z.array(z.string()),
-});
-
-const RetrievalTraceSchema = z.object({
-  candidate_ids: z.array(z.string()),
-  candidate_count: z.number(),
-  query_text: z.string(),
-  skip_repair: z.boolean(),
-});
-
-const PackagingTraceSchema = z.object({
-  package_type: z.enum(['subject-pack', 'timeline-pack', 'tiered']),
-  included_ids: z.array(z.string()),
-  dropped_ids: z.array(z.string()),
-  evidence_roles: z.record(z.string(), z.enum(['primary', 'supporting', 'historical', 'contextual'])),
-  episode_count: z.number(),
-  date_count: z.number(),
-  has_current_marker: z.boolean(),
-  has_conflict_block: z.boolean(),
-  token_cost: z.number(),
-});
-
-const AssemblyTraceSchema = z.object({
-  final_ids: z.array(z.string()),
-  final_token_cost: z.number(),
-  token_budget: z.number().nullable(),
-  primary_evidence_position: z.number().nullable(),
-  blocks: z.array(z.string()),
-});
-
-const ObservabilityResponseSchema = z.object({
-  retrieval: RetrievalTraceSchema.optional(),
-  packaging: PackagingTraceSchema.optional(),
-  assembly: AssemblyTraceSchema.optional(),
-}).openapi({ description: 'Retrieval pipeline trace summaries.' });
 
 const ClusterCandidateSchema = z.object({
   member_ids: z.array(z.string()),

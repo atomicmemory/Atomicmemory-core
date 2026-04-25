@@ -46,9 +46,20 @@ describe('TraceCollector', () => {
     const results = [makeResult('m1', 0.95, 0.88, 'Alice likes cats')];
 
     trace.stage('initial', results, { candidateDepth: 15 });
+    trace.setRetrievalSummary({
+      candidateIds: ['m1'],
+      candidateCount: 1,
+      queryText: 'test query',
+      skipRepair: false,
+    });
     trace.finalize(results);
 
     expect(writeFileSpy).toHaveBeenCalledOnce();
+    expect(trace.getRetrievalSummary()).toMatchObject({
+      traceId: expect.stringMatching(/^trace-/),
+      stageCount: 2,
+      stageNames: ['initial', 'final'],
+    });
     const output = getWrittenTrace();
     expect(output.query).toBe('test query');
     expect(output.userId).toBe('user-1');
