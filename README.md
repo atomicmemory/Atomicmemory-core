@@ -180,8 +180,17 @@ Storage: Postgres + pgvector. Retrieval: hybrid (vector + BM25/FTS). Mutation: c
 npm test                    # Run unit tests
 npm run test:deployment     # Deployment config tests
 npm run test:docker-smoke   # Docker smoke test
+npm run test:schema         # Schema regression fuzzing (Schemathesis)
 npm run migrate:test        # Run migrations against test DB
 ```
+
+### Schema regression tests
+
+Property-based fuzzing of `openapi.yaml` via Schemathesis runs on every
+PR (`schema-fuzz` job in `.github/workflows/ci.yml`). Catches wire-shape
+regressions where a route's response drifts from its declared schema.
+See [`tests/schema/`](tests/schema/) for how to run locally and how to
+read the report.
 
 ## Contributing
 

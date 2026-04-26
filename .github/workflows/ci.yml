@@ -82,3 +82,44 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  schema-fuzz:
+    # Property-based fuzzing of openapi.yaml via Schemathesis. Pulls up the
+    # smoke-isolated docker-compose (stub-LLM mode), runs the spec against
+    # the live app, tears down. Catches wire-shape regressions without
+    # re-implementing per-route assertions.
+    #
+    # Bake-window posture: continue-on-error: true for 1-2 weeks while the
+    # baseline noise gets tuned out. Flip to a hard gate in a follow-up PR
+    # after the signal is stable.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Schemathesis
+        run: pip install 'schemathesis==3.*'
+
+      - name: Run Schemathesis against openapi.yaml
+        run: bash tests/schema/run-schemathesis.sh
+
+      - name: Upload Schemathesis diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schemathesis-diagnostics
+          # Three artifacts the runner writes (run-schemathesis.sh:140-142):
+          # - schemathesis-report.json  — Schemathesis.io-format tarball (despite the .json suffix)
+          # - schemathesis-report.xml   — JUnit XML for human-readable diagnostics
+          # - schemathesis-cassette.yaml — VCR cassette for failure replay
+          path: |
+            schemathesis-report.json
+            schemathesis-report.xml
+            schemathesis-cassette.yaml
+          if-no-files-found: ignore
