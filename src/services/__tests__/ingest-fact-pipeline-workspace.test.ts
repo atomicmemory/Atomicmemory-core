@@ -112,6 +112,11 @@ describe('processFactThroughPipeline — workspace path (Phase 5 Step 10)', () =
       expect.anything(), 'u1', baseFact, expect.any(Array),
       'site', 'url', 'ep1', 0.9, null, undefined,
       expect.any(Array), expect.any(Set), workspace,
+      expect.objectContaining({
+        fact: baseFact,
+        writeSecurity: expect.objectContaining({ allowed: true }),
+        candidates: expect.any(Array),
+      }),
     );
   });
 
@@ -125,7 +130,14 @@ describe('processFactThroughPipeline — workspace path (Phase 5 Step 10)', () =
     await processFactThroughPipeline(
       deps, 'u1', baseFact, 'site', 'url', 'ep1', makeOptions(),
     );
-    const lastArg = mockResolveAndExecuteAudn.mock.calls[0]?.slice(-1)[0];
-    expect(lastArg).toEqual(workspace);
+    const args = mockResolveAndExecuteAudn.mock.calls[0] ?? [];
+    expect(args.at(-2)).toEqual(workspace);
+    expect(args.at(-1)).toEqual(expect.objectContaining({
+      fact: baseFact,
+      writeSecurity: expect.objectContaining({ allowed: true }),
+      candidates: [
+        expect.objectContaining({ id: 'existing', similarity: 0.85 }),
+      ],
+    }));
   });
 });

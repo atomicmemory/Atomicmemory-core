@@ -17,7 +17,30 @@ import { shouldDeferAudn, deferMemoryForReconciliation } from './deferred-audn.j
 import { timed } from './timing.js';
 import { emitLineageEvent } from './memory-lineage.js';
 import { storeCanonicalFact, storeProjection, applyEntityScopedDedup, ensureClaimTarget, findConflictCandidates, findSlotConflictCandidates } from './memory-storage.js';
-import type { AudnFactContext, ClaimTarget, FactInput, FactResult, MemoryServiceDeps, Outcome } from './memory-service-types.js';
+import type {
+  AudnFactContext,
+  ClaimTarget,
+  FactInput,
+  FactResult,
+  IngestFactTrace,
+  IngestTraceAction,
+  IngestTraceCandidate,
+  MemoryServiceDeps,
+  Outcome,
+} from './memory-service-types.js';
+
+interface AudnTraceContext {
+  fact: FactInput;
+  logicalTimestamp?: Date;
+  writeSecurity: { allowed: boolean; blockedBy: string | null; trust: { score: number } };
+  entropyResult?: {
+    score: number;
+    entityNovelty: number;
+    semanticNovelty: number;
+    accepted: boolean;
+  } | null;
+  candidates: IngestTraceCandidate[];
+}
 
 /** Find conflict candidates, merge slot-aware candidates, and filter out superseded. */
 export async function findFilteredCandidates(
@@ -51,13 +74,14 @@ export async function resolveAndExecuteAudn(
   filteredCandidates: CandidateMemory[],
   supersededTargets: Set<string>,
   workspace?: import('../db/repository-types.js').WorkspaceContext,
+  traceContext?: AudnTraceContext,
 ): Promise<FactResult> {
   const candidateIds = new Set(filteredCandidates.map((c) => c.id));
   const ctx: AudnFactContext = { userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore, claimSlot, logicalTimestamp, workspace };
 
   const fastDecision = tryFastAUDN(fact.fact, filteredCandidates, deps.config);
   if (fastDecision) {
-    return executeAndTrackSupersede(deps, fastDecision, candidateIds, ctx, supersededTargets);
+    return executeAndTrackSupersede(deps, fastDecision, candidateIds, ctx, supersededTargets, requireTraceContext(traceContext), 'fast-audn', 'NOOP', fastDecision.action);
   }
 
   if (shouldDeferAudn(false, filteredCandidates.length)) {
@@ -66,7 +90,11 @@ export async function resolveAndExecuteAudn(
       await deferMemoryForReconciliation(deps.stores.pool, result.memoryId, filteredCandidates);
       console.log(`[deferred-audn] Deferred: ${result.memoryId} (${filteredCandidates.length} candidates)`);
     }
-    return { ...result, embedding };
+    return {
+      ...result,
+      embedding,
+      trace: buildAudnTrace(requireTraceContext(traceContext), 'deferred-audn', 'ADD', 'deferred-audn-store', result.outcome, result.memoryId, null),
+    };
   }
 
   const rawDecision = await timed('ingest.fact.audn', () => cachedResolveAUDN(fact.fact, filteredCandidates));
@@ -74,7 +102,7 @@ export async function resolveAndExecuteAudn(
   if (deps.config.entityGraphEnabled && deps.stores.entity) {
     decision = await applyEntityScopedDedup(deps, decision, userId, fact.entities);
   }
-  return executeAndTrackSupersede(deps, decision, candidateIds, ctx, supersededTargets);
+  return executeAndTrackSupersede(deps, decision, candidateIds, ctx, supersededTargets, requireTraceContext(traceContext), 'llm-audn', rawDecision.action, decision.action);
 }
 
 /** Execute the AUDN decision and track supersede targets. */
@@ -84,12 +112,29 @@ async function executeAndTrackSupersede(
   candidateIds: Set<string>,
   ctx: AudnFactContext,
   supersededTargets: Set<string>,
+  traceContext: AudnTraceContext,
+  source: 'fast-audn' | 'llm-audn',
+  rawAction: string | null,
+  effectiveAction: IngestTraceAction,
 ): Promise<FactResult> {
   const result = await executeDecision(deps, decision, candidateIds, ctx);
   if (decision.action === 'SUPERSEDE' && result.memoryId) {
     supersededTargets.add(result.memoryId);
   }
-  return { ...result, embedding: ctx.embedding };
+  return {
+    ...result,
+    embedding: ctx.embedding,
+    trace: buildAudnTrace(
+      traceContext,
+      source,
+      effectiveAction,
+      reasonCodeForDecision(source, decision, result),
+      result.outcome,
+      result.memoryId,
+      decision.targetMemoryId,
+      rawAction,
+    ),
+  };
 }
 
 async function executeDecision(
@@ -115,6 +160,84 @@ async function executeDecision(
     return storeCanonicalFact(deps, ctx);
   }
   return executeMutationDecision(deps, decision, ctx);
+}
+
+function buildAudnTrace(
+  traceContext: AudnTraceContext,
+  source: 'fast-audn' | 'deferred-audn' | 'llm-audn',
+  action: IngestTraceAction,
+  reasonCode: IngestFactTrace['decision']['reasonCode'],
+  outcome: Outcome,
+  memoryId: string | null,
+  targetMemoryId: string | null,
+  rawAction?: string | null,
+): IngestFactTrace {
+  return {
+    factText: traceContext.fact.fact,
+    headline: traceContext.fact.headline,
+    factType: traceContext.fact.type,
+    importance: traceContext.fact.importance,
+    ...(traceContext.logicalTimestamp ? { logicalTimestamp: traceContext.logicalTimestamp.toISOString() } : {}),
+    writeSecurity: {
+      allowed: traceContext.writeSecurity.allowed,
+      blockedBy: traceContext.writeSecurity.blockedBy,
+      trustScore: traceContext.writeSecurity.trust.score,
+    },
+    ...(traceContext.entropyResult ? { entropyGate: traceContext.entropyResult } : {}),
+    candidates: traceContext.candidates,
+    decision: {
+      source,
+      action,
+      reasonCode,
+      targetMemoryId,
+      candidateIds: traceContext.candidates.map((candidate) => candidate.id),
+      ...(rawAction ? { rawAction } : {}),
+    },
+    outcome,
+    memoryId,
+  };
+}
+
+function requireTraceContext(traceContext: AudnTraceContext | undefined): AudnTraceContext {
+  if (!traceContext) {
+    throw new Error('resolveAndExecuteAudn requires traceContext.');
+  }
+  return traceContext;
+}
+
+function reasonCodeForDecision(
+  source: 'fast-audn' | 'llm-audn',
+  decision: AUDNDecision,
+  result: { outcome: Outcome; memoryId: string | null },
+): IngestFactTrace['decision']['reasonCode'] {
+  if (source === 'fast-audn') return 'fast-audn-noop';
+  if (isInvalidTargetFallback(decision, result)) {
+    return 'invalid-target-fallback';
+  }
+  return decision.action === 'SUPERSEDE' && !result.memoryId
+    ? 'invalid-target-fallback'
+    : decisionReasonCode(decision.action);
+}
+
+function isInvalidTargetFallback(
+  decision: AUDNDecision,
+  result: { outcome: Outcome; memoryId: string | null },
+): boolean {
+  return !['ADD', 'NOOP', 'CLARIFY'].includes(decision.action) && result.outcome === 'stored';
+}
+
+function decisionReasonCode(
+  action: AUDNDecision['action'],
+): IngestFactTrace['decision']['reasonCode'] {
+  const reasonCodes = {
+    ADD: 'llm-audn-add',
+    NOOP: 'llm-audn-noop',
+    CLARIFY: 'llm-audn-clarify',
+    UPDATE: 'llm-audn-update',
+    DELETE: 'llm-audn-delete',
+    SUPERSEDE: 'llm-audn-supersede',
+  } satisfies Record<AUDNDecision['action'], IngestFactTrace['decision']['reasonCode']>;
+  return reasonCodes[action];
 }
 
 /** Handle opinion network intercept: update confidence instead of normal AUDN. */

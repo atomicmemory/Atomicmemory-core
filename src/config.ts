@@ -70,6 +70,8 @@ export interface RuntimeConfig {
   llmSeed?: number;
   stagedLoadingEnabled: boolean;
   retrievalTraceEnabled: boolean;
+  ingestTraceDir: string;
+  ingestTraceEnabled: boolean;
   extractionCacheEnabled: boolean;
   extractionCacheDir: string;
   embeddingCacheEnabled: boolean;
@@ -315,6 +317,8 @@ export const config: RuntimeConfig = {
   llmSeed: parseLlmSeed(optionalEnv('LLM_SEED')),
   stagedLoadingEnabled: (optionalEnv('STAGED_LOADING_ENABLED') ?? 'false') === 'true',
   retrievalTraceEnabled: (optionalEnv('RETRIEVAL_TRACE_ENABLED') ?? 'false') === 'true',
+  ingestTraceDir: optionalEnv('INGEST_TRACE_DIR') ?? './.traces/ingest',
+  ingestTraceEnabled: (optionalEnv('INGEST_TRACE_ENABLED') ?? 'false') === 'true',
   extractionCacheEnabled: (optionalEnv('EXTRACTION_CACHE_ENABLED') ?? 'false') === 'true',
   extractionCacheDir: optionalEnv('EXTRACTION_CACHE_DIR') ?? './.eval-cache',
   embeddingCacheEnabled: (optionalEnv('EMBEDDING_CACHE_ENABLED') ?? 'false') === 'true',
@@ -478,7 +482,7 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   // PPR
   'pprEnabled', 'pprDamping',
   // Staging / tracing
-  'stagedLoadingEnabled', 'retrievalTraceEnabled',
+  'stagedLoadingEnabled', 'retrievalTraceEnabled', 'ingestTraceDir', 'ingestTraceEnabled',
   // Extraction internals
   'extractionCacheEnabled', 'embeddingCacheEnabled',
   'chunkedExtractionEnabled', 'chunkedExtractionFallbackEnabled',

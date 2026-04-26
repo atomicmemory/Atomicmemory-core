@@ -6,6 +6,7 @@
 import { embedText } from './embedding.js';
 import { consensusExtractFacts } from './consensus-extraction.js';
 import { quickExtractFacts } from './quick-extraction.js';
+import { IngestTraceCollector } from './ingest-trace.js';
 import { assessWriteSecurity } from './write-security.js';
 import { timed } from './timing.js';
 import { runPostWriteProcessors } from './ingest-post-write.js';
@@ -60,6 +61,21 @@ function buildIngestResult(episodeId: string, factsCount: number, acc: IngestAcc
   };
 }
 
+function finalizeIngestResult(
+  episodeId: string,
+  factsCount: number,
+  acc: IngestAccumulator,
+  linksCreated: number,
+  compositesCreated: number,
+  traceCollector: IngestTraceCollector,
+  traceMetadata: Parameters<IngestTraceCollector['finalize']>[0],
+): IngestResult {
+  return {
+    ...buildIngestResult(episodeId, factsCount, acc, linksCreated, compositesCreated),
+    ingestTraceId: traceCollector.finalize(traceMetadata),
+  };
+}
+
 /** Full consensus-based ingest pipeline. */
 export async function performIngest(
   deps: MemoryServiceDeps,
@@ -73,6 +89,7 @@ export async function performIngest(
   const logicalSessionTimestamp = resolveSessionDate(sessionTimestamp, conversationText);
   const episodeId = await timed('ingest.store-episode', () => deps.stores.episode.storeEpisode({ userId, content: conversationText, sourceSite, sourceUrl }));
   const facts = await timed('ingest.extract', () => consensusExtractFacts(conversationText, deps.config));
+  const traceCollector = new IngestTraceCollector(deps.config.ingestTraceEnabled);
   const acc = createIngestAccumulator();
   const supersededTargets = new Set<string>();
   const entropyCtx: EntropyContext = { seenEntities: new Set(), previousEmbedding: null };
@@ -81,7 +98,7 @@ export async function performIngest(
   for (const fact of facts) {
     const result = await timed('ingest.fact', () => processFactThroughPipeline(
       deps, userId, fact, sourceSite, sourceUrl, episodeId,
-      { entropyGate: true, fullAudn: true, supersededTargets, entropyCtx, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'ingest' },
+      { entropyGate: true, fullAudn: true, supersededTargets, entropyCtx, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'ingest', traceCollector },
     ));
     accumulateFactResult(acc, result);
     if (result.memoryId) storedFacts.push({ memoryId: result.memoryId, fact });
@@ -95,7 +112,15 @@ export async function performIngest(
   });
 
   console.log(`[timing] ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${facts.length} facts, ${postWrite.compositesCreated} composites)`);
-  return buildIngestResult(episodeId, facts.length, acc, postWrite.linksCreated, postWrite.compositesCreated);
+  return finalizeIngestResult(
+    episodeId,
+    facts.length,
+    acc,
+    postWrite.linksCreated,
+    postWrite.compositesCreated,
+    traceCollector,
+    { mode: 'full', userId, sourceSite, sourceUrl, episodeId, factsExtracted: facts.length },
+  );
 }
 
 /**
@@ -115,12 +140,13 @@ export async function performQuickIngest(
   const episodeId = await deps.stores.episode.storeEpisode({ userId, content: conversationText, sourceSite, sourceUrl });
   const facts = timed('quick-ingest.extract', () => Promise.resolve(quickExtractFacts(conversationText)));
   const extractedFacts = await facts;
+  const traceCollector = new IngestTraceCollector(deps.config.ingestTraceEnabled);
   const acc = createIngestAccumulator();
 
   for (const fact of extractedFacts) {
     const result = await timed('quick-ingest.fact', () => processFactThroughPipeline(
       deps, userId, fact, sourceSite, sourceUrl, episodeId,
-      { entropyGate: false, fullAudn: false, supersededTargets: new Set(), entropyCtx: { seenEntities: new Set(), previousEmbedding: null }, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'quick-ingest' },
+      { entropyGate: false, fullAudn: false, supersededTargets: new Set(), entropyCtx: { seenEntities: new Set(), previousEmbedding: null }, logicalTimestamp: logicalSessionTimestamp, timingPrefix: 'quick-ingest', traceCollector },
     ));
     accumulateFactResult(acc, result);
   }
@@ -133,7 +159,15 @@ export async function performQuickIngest(
   });
 
   console.log(`[timing] quick-ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${extractedFacts.length} facts, ${acc.counters.stored} stored, ${acc.counters.skipped} skipped)`);
-  return buildIngestResult(episodeId, extractedFacts.length, acc, postWrite.linksCreated, 0);
+  return finalizeIngestResult(
+    episodeId,
+    extractedFacts.length,
+    acc,
+    postWrite.linksCreated,
+    0,
+    traceCollector,
+    { mode: 'quick', userId, sourceSite, sourceUrl, episodeId, factsExtracted: extractedFacts.length },
+  );
 }
 
 /**
@@ -152,6 +186,7 @@ export async function performStoreVerbatim(
   const embedding = await embedText(content);
   const writeSecurity = assessWriteSecurity(content, sourceSite, deps.config);
   const trustScore = writeSecurity.allowed ? writeSecurity.trust.score : 0.5;
+  const traceCollector = new IngestTraceCollector(deps.config.ingestTraceEnabled);
 
   const memoryId = await deps.stores.memory.storeMemory({
     userId,
@@ -168,6 +203,26 @@ export async function performStoreVerbatim(
     trustScore,
   });
 
+  traceCollector.record({
+    factText: content,
+    headline: content.slice(0, 80),
+    factType: 'verbatim',
+    importance: 0.5,
+    writeSecurity: {
+      allowed: writeSecurity.allowed,
+      blockedBy: writeSecurity.blockedBy,
+      trustScore: writeSecurity.trust.score,
+    },
+    decision: {
+      source: 'verbatim',
+      action: 'ADD',
+      reasonCode: 'verbatim-store',
+      targetMemoryId: null,
+    },
+    outcome: 'stored',
+    memoryId,
+  });
+
   return {
     episodeId,
     factsExtracted: 1,
@@ -180,6 +235,7 @@ export async function performStoreVerbatim(
     memoryIds: [memoryId],
     linksCreated: 0,
     compositesCreated: 0,
+    ingestTraceId: traceCollector.finalize({ mode: 'verbatim', userId, sourceSite, sourceUrl, episodeId, factsExtracted: 1 }),
   };
 }
 
@@ -202,6 +258,7 @@ export async function performWorkspaceIngest(
     }),
   );
   const facts = await timed('ws-ingest.extract', () => consensusExtractFacts(conversationText, deps.config));
+  const traceCollector = new IngestTraceCollector(deps.config.ingestTraceEnabled);
   const acc = createIngestAccumulator();
   const supersededTargets = new Set<string>();
   const entropyCtx: EntropyContext = { seenEntities: new Set(), previousEmbedding: null };
@@ -217,6 +274,7 @@ export async function performWorkspaceIngest(
           entropyCtx,
           logicalTimestamp: logicalSessionTimestamp,
           timingPrefix: 'ws-ingest',
+          traceCollector,
         }),
     );
     accumulateFactResult(acc, result);
@@ -230,5 +288,13 @@ export async function performWorkspaceIngest(
   });
 
   console.log(`[timing] ws-ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${facts.length} facts, workspace=${workspace.workspaceId})`);
-  return buildIngestResult(episodeId, facts.length, acc, postWrite.linksCreated, 0);
+  return finalizeIngestResult(
+    episodeId,
+    facts.length,
+    acc,
+    postWrite.linksCreated,
+    0,
+    traceCollector,
+    { mode: 'workspace', userId, sourceSite, sourceUrl, episodeId, factsExtracted: facts.length },
+  );
 }

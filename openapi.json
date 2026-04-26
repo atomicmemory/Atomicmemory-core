@@ -2099,6 +2099,9 @@
                     "facts_extracted": {
                       "type": "number"
                     },
+                    "ingest_trace_id": {
+                      "type": "string"
+                    },
                     "links_created": {
                       "type": "number"
                     },
@@ -2290,6 +2293,9 @@
                     },
                     "facts_extracted": {
                       "type": "number"
+                    },
+                    "ingest_trace_id": {
+                      "type": "string"
                     },
                     "links_created": {
                       "type": "number"

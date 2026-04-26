@@ -178,6 +178,7 @@ export const IngestResponseSchema = z.object({
   updated_memory_ids: z.array(z.string()),
   links_created: z.number(),
   composites_created: z.number(),
+  ingest_trace_id: z.string().optional(),
 }).openapi({ description: 'Ingest result: extraction counts + stored/updated memory IDs.' });
 
 export const SearchResponseSchema = z.object({

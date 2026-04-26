@@ -5,6 +5,7 @@
 import { type TrustScore } from './trust-scoring.js';
 import { type ExtractedEntity, type ExtractedRelation } from './extraction.js';
 import { type MemoryNetwork } from './memory-network.js';
+import type { AUDNAction } from './extraction.js';
 import { type ClaimSlotInput } from '../db/claim-repository.js';
 
 export interface FactInput {
@@ -28,10 +29,69 @@ export interface ClaimTarget {
 
 export type Outcome = 'stored' | 'updated' | 'deleted' | 'skipped';
 
+export type IngestTraceAction = AUDNAction | 'SKIP';
+
+export type IngestTraceReasonCode =
+  | 'verbatim-store'
+  | 'write-security-sanitization'
+  | 'write-security-trust'
+  | 'entropy-gate'
+  | 'direct-store-no-candidates'
+  | 'workspace-direct-store'
+  | 'fast-audn-noop'
+  | 'quick-duplicate-noop'
+  | 'deferred-audn-store'
+  | 'llm-audn-add'
+  | 'llm-audn-noop'
+  | 'llm-audn-clarify'
+  | 'llm-audn-update'
+  | 'llm-audn-delete'
+  | 'llm-audn-supersede'
+  | 'invalid-target-fallback';
+
+export interface IngestTraceCandidate {
+  id: string;
+  similarity: number;
+  contentPreview: string;
+}
+
+export interface IngestTraceDecision {
+  source: 'direct-store' | 'fast-audn' | 'quick-dedup' | 'deferred-audn' | 'llm-audn' | 'write-security' | 'entropy-gate' | 'verbatim';
+  action: IngestTraceAction;
+  reasonCode: IngestTraceReasonCode;
+  targetMemoryId: string | null;
+  rawAction?: string;
+  candidateIds?: string[];
+}
+
+export interface IngestFactTrace {
+  factText: string;
+  headline: string;
+  factType: FactInput['type'] | 'verbatim';
+  importance: number;
+  logicalTimestamp?: string;
+  writeSecurity?: {
+    allowed: boolean;
+    blockedBy: string | null;
+    trustScore: number;
+  };
+  entropyGate?: {
+    score: number;
+    entityNovelty: number;
+    semanticNovelty: number;
+    accepted: boolean;
+  };
+  candidates?: IngestTraceCandidate[];
+  decision: IngestTraceDecision;
+  outcome: Outcome;
+  memoryId: string | null;
+}
+
 export interface FactResult {
   outcome: Outcome;
   memoryId: string | null;
   embedding?: number[];
+  trace?: IngestFactTrace;
 }
 
 export interface AtomicFactProjection {
@@ -113,6 +173,7 @@ export interface IngestResult {
   memoryIds: string[];
   linksCreated: number;
   compositesCreated: number;
+  ingestTraceId?: string;
 }
 
 export interface RetrievalResult {
@@ -217,6 +278,7 @@ export interface IngestRuntimeConfig {
   entropyGateThreshold: number;
   fastAudnDuplicateThreshold: number;
   fastAudnEnabled: boolean;
+  ingestTraceEnabled: boolean;
   lessonsEnabled: boolean;
   llmModel: string;
   trustScoringEnabled: boolean;

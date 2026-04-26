@@ -69,6 +69,19 @@ function makeDeps() {
 
 const candidates = [{ id: 'target-1', content: 'old fact', similarity: 0.85, importance: 0.5 }];
 
+function makeTraceContext(fact = baseFact, logicalTimestamp?: Date) {
+  return {
+    fact,
+    logicalTimestamp,
+    writeSecurity: { allowed: true, blockedBy: null, trust: { score: 0.9 } },
+    candidates: candidates.map((candidate) => ({
+      id: candidate.id,
+      similarity: candidate.similarity,
+      contentPreview: candidate.content,
+    })),
+  };
+}
+
 describe('AUDN workspace scope fences', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -84,6 +97,7 @@ describe('AUDN workspace scope fences', () => {
     await resolveAndExecuteAudn(
       makeDeps(), 'u1', baseFact, [0.1, 0.2], 'site', 'url', 'ep1',
       0.9, null, logicalTimestamp, candidates, new Set(), workspace,
+      makeTraceContext(baseFact, logicalTimestamp),
     );
 
     expect(mockStoreMemory).toHaveBeenCalledWith(
@@ -112,6 +126,7 @@ describe('AUDN workspace scope fences', () => {
     await resolveAndExecuteAudn(
       deps, 'u1', opinionFact, [0.1, 0.2], 'site', 'url', 'ep1',
       0.9, null, logicalTimestamp, candidates, new Set(), workspace,
+      makeTraceContext(opinionFact, logicalTimestamp),
     );
 
     // Opinion confidence dropped to 0 → storeMemory must be called with needs_clarification

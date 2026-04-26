@@ -163,16 +163,23 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('POST /ingest with override → headers + trailing effectiveConfig arg', async () => {
+    ingest.mockResolvedValueOnce({
+      episodeId: 'ep', factsExtracted: 0, memoriesStored: 0, memoriesUpdated: 0,
+      memoriesDeleted: 0, memoriesSkipped: 0, storedMemoryIds: [], updatedMemoryIds: [],
+      memoryIds: [], linksCreated: 0, compositesCreated: 0, ingestTraceId: 'ingest-trace-1',
+    });
     const res = await postJson(`/memories/ingest`, {
         user_id: 'u', conversation: 'hi', source_site: 's',
-        config_override: { chunkedExtractionEnabled: true },
+        config_override: { chunkedExtractionEnabled: true, ingestTraceEnabled: true },
       });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
-    expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('chunkedExtractionEnabled');
+    expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('chunkedExtractionEnabled,ingestTraceEnabled');
+    expect((await res.clone().json()).ingest_trace_id).toBe('ingest-trace-1');
     const call = ingest.mock.calls[0]!;
-    const effectiveConfig = call[5] as { chunkedExtractionEnabled: boolean };
+    const effectiveConfig = call[5] as { chunkedExtractionEnabled: boolean; ingestTraceEnabled: boolean };
     expect(effectiveConfig.chunkedExtractionEnabled).toBe(true);
+    expect(effectiveConfig.ingestTraceEnabled).toBe(true);
   });
 
   it('POST /ingest/quick with override → headers + trailing effectiveConfig arg', async () => {

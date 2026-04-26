@@ -40,6 +40,7 @@ export function formatIngestResponse(result: IngestResult) {
     updated_memory_ids: result.updatedMemoryIds,
     links_created: result.linksCreated,
     composites_created: result.compositesCreated,
+    ...(result.ingestTraceId ? { ingest_trace_id: result.ingestTraceId } : {}),
   };
 }
 
