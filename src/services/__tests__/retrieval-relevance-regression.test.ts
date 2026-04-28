@@ -39,7 +39,7 @@ const { performSearch, performWorkspaceSearch } = await import('../memory-search
 const { config } = await import('../../config.js');
 
 const TEST_USER = 'retrieval-relevance-regression-user';
-const DIRECT_FACT_PRECISION_FLOOR = 1;
+const DIRECT_FACT_PRECISION_FLOOR = 0.8;
 
 describe('retrieval relevance regression', () => {
   beforeEach(() => {

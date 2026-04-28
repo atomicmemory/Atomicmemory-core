@@ -70,6 +70,8 @@ export function resolveRelevanceGate(
   context: RelevanceGateContext = {},
 ): RelevanceGate {
   const queryLabel = classifyQueryDetailed(query).label;
+  // Explicit caller policy is authoritative; recall-preserving bypasses below
+  // only relax the config default when the request has not supplied a floor.
   if (requestedThreshold !== undefined) {
     return buildGate(requestedThreshold, 'request', 'caller-threshold', queryLabel);
   }
