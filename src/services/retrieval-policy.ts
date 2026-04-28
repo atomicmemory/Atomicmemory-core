@@ -4,6 +4,7 @@
 
 import type { CoreRuntimeConfig } from '../app/runtime-container.js';
 import type { SearchResult } from '../db/memory-repository.js';
+import { isCurrentStateQuery, isHistoricalQuery } from './current-state-ranking.js';
 import { isTemporalOrderingQuery } from './temporal-query-expansion.js';
 
 const SIMPLE_QUERY_LIMIT = 5;
@@ -22,6 +23,31 @@ type AdaptiveLimitConfig = Pick<
   | 'adaptiveMultiHopLimit'
   | 'adaptiveAggregationLimit'
 >;
+
+type RankingEligibilityConfig = Pick<CoreRuntimeConfig, 'retrievalProfileSettings'>;
+
+export interface RankingEligibilityContext {
+  sourceSite?: string;
+  referenceTime?: Date;
+}
+
+export interface RankingEligibilityDecision {
+  id: string;
+  similarity: number;
+  threshold: number;
+  decision: 'eligible' | 'filtered';
+  reason: string;
+}
+
+export interface RankingEligibilityResult {
+  results: SearchResult[];
+  decisions: RankingEligibilityDecision[];
+  removedIds: string[];
+  threshold: number | null;
+  reason: string;
+  queryLabel: QueryComplexityLabel;
+  triggered: boolean;
+}
 
 /** Hard ceiling for aggregation queries (prevents runaway candidate pools). */
 const AGGREGATION_HARD_CAP = 50;
@@ -188,6 +214,57 @@ export function resolveRerankDepth(
   return Math.max(clampLimitWide(limit), runtimeConfig.retrievalProfileSettings.rerankDepth);
 }
 
+export function applyRankingEligibility(
+  query: string,
+  candidates: SearchResult[],
+  runtimeConfig: RankingEligibilityConfig,
+  context: RankingEligibilityContext = {},
+): RankingEligibilityResult {
+  const queryLabel = classifyQueryDetailed(query).label;
+  const bypassReason = resolveRankingEligibilityBypass(query, queryLabel, context);
+  if (bypassReason) {
+    return {
+      results: candidates,
+      decisions: [],
+      removedIds: [],
+      threshold: null,
+      reason: bypassReason,
+      queryLabel,
+      triggered: false,
+    };
+  }
+
+  const threshold = clampUnit(runtimeConfig.retrievalProfileSettings.rankingMinSimilarity);
+  if (threshold <= 0) {
+    return {
+      results: candidates,
+      decisions: [],
+      removedIds: [],
+      threshold: null,
+      reason: 'non-positive-ranking-threshold',
+      queryLabel,
+      triggered: false,
+    };
+  }
+
+  const decisions = candidates.map((candidate) => buildRankingEligibilityDecision(candidate, threshold));
+  const removedIds = decisions
+    .filter((decision) => decision.decision === 'filtered')
+    .map((decision) => decision.id);
+  const keptIds = new Set(
+    decisions.filter((decision) => decision.decision === 'eligible').map((decision) => decision.id),
+  );
+  return {
+    results: candidates.filter((candidate) => keptIds.has(candidate.id)),
+    decisions,
+    removedIds,
+    threshold,
+    reason: 'direct-query-ranking-floor',
+    queryLabel,
+    triggered: true,
+  };
+}
+
 export type QueryComplexityLabel = 'simple' | 'medium' | 'complex' | 'multi-hop' | 'aggregation';
 
 export interface QueryClassification {
@@ -249,6 +326,44 @@ function clampLimit(limit: number, maxSearchResults: number): number {
 /** Wider clamp for pipeline internals — respects aggregation ceiling, not profile cap. */
 function clampLimitWide(limit: number): number {
   return Math.max(1, Math.min(AGGREGATION_HARD_CAP, Math.floor(limit)));
+}
+
+function resolveRankingEligibilityBypass(
+  query: string,
+  queryLabel: QueryComplexityLabel,
+  context: RankingEligibilityContext,
+): string | null {
+  if (context.referenceTime) return 'as-of-query';
+  if (context.sourceSite) return 'source-site-filter';
+  if (isCurrentStateQuery(query) || isHistoricalQuery(query)) return 'temporal-state-query';
+  if (queryLabel === 'complex' || queryLabel === 'multi-hop' || queryLabel === 'aggregation') {
+    return `recall-oriented-${queryLabel}-query`;
+  }
+  return null;
+}
+
+function buildRankingEligibilityDecision(
+  candidate: SearchResult,
+  threshold: number,
+): RankingEligibilityDecision {
+  const similarity = finiteOrZero(candidate.similarity);
+  const eligible = similarity >= threshold;
+  return {
+    id: candidate.id,
+    similarity,
+    threshold,
+    decision: eligible ? 'eligible' : 'filtered',
+    reason: eligible ? 'meets-ranking-floor' : 'below-ranking-floor',
+  };
+}
+
+function finiteOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function mergeWeightedResults(

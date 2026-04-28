@@ -13,6 +13,7 @@ import type { SearchStore, SemanticLinkStore, MemoryStore, EntityStore } from '.
 import { embedText } from './embedding.js';
 import { rewriteQuery } from './extraction.js';
 import {
+  applyRankingEligibility,
   resolveRerankDepth,
   shouldRunRepairLoop,
   shouldAcceptRepair,
@@ -260,6 +261,7 @@ export async function runSearchPipelineWithTrace(
     results,
     queryEmbedding,
     limit,
+    sourceSite,
     referenceTime,
     temporalExpansion.temporalAnchorFingerprints,
     trace,
@@ -701,6 +703,7 @@ async function applyExpansionAndReranking(
   results: SearchResult[],
   queryEmbedding: number[],
   limit: number,
+  sourceSite: string | undefined,
   referenceTime: Date | undefined,
   temporalAnchorFingerprints: string[],
   trace: TraceCollector,
@@ -715,15 +718,23 @@ async function applyExpansionAndReranking(
     trace,
     policyConfig,
   );
+  const eligible = applyRankingEligibilityStage(
+    query,
+    ranked,
+    sourceSite,
+    referenceTime,
+    trace,
+    policyConfig,
+  );
 
   return selectAndExpandCandidates(
     stores,
     userId,
-    ranked.candidates,
+    eligible.candidates,
     queryEmbedding,
     limit,
     referenceTime,
-    ranked.protectedFingerprints,
+    eligible.protectedFingerprints,
     trace,
     policyConfig,
   );
@@ -841,6 +852,29 @@ function applyTemporalConstraintStage(
     candidates: constrained.results,
     protectedFingerprints: [...state.protectedFingerprints, ...constrained.protectedFingerprints],
   };
+}
+
+function applyRankingEligibilityStage(
+  query: string,
+  state: RankedCandidateState,
+  sourceSite: string | undefined,
+  referenceTime: Date | undefined,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  const eligibility = applyRankingEligibility(query, state.candidates, policyConfig, {
+    sourceSite,
+    referenceTime,
+  });
+  if (!eligibility.triggered) return state;
+  trace.stage('ranking-eligibility', eligibility.results, {
+    threshold: eligibility.threshold,
+    reason: eligibility.reason,
+    queryLabel: eligibility.queryLabel,
+    removedIds: eligibility.removedIds,
+    decisions: eligibility.decisions,
+  });
+  return { ...state, candidates: eligibility.results };
 }
 
 async function selectAndExpandCandidates(

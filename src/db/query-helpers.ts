@@ -22,6 +22,7 @@ export interface HybridQueryParams {
   wSim: number;
   wImp: number;
   wRec: number;
+  rankingMinSimilarity: number;
 }
 
 /**
@@ -29,7 +30,7 @@ export interface HybridQueryParams {
  *
  * Returns an array of positional params, the site filter clause, and
  * scoring weights. The caller must set the first params in a known order:
- *   $1=embedding, $2=userId, $3=queryText, $4=limit, $5=wSim, $6=wImp, $7=wRec, $8=refTime, [$9=sourceSite]
+ *   $1=embedding, $2=userId, $3=queryText, $4=limit, $5=wSim, $6=wImp, $7=wRec, $8=refTime, $9=rankingMinSimilarity, [$10=sourceSite]
  */
 export function buildHybridSearchParams(
   queryEmbedding: number[],
@@ -43,23 +44,24 @@ export function buildHybridSearchParams(
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
+  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
   const refTime = (referenceTime ?? new Date()).toISOString();
-  const siteFilter = sourceSite ? `AND ${siteFilterColumn} = $9` : '';
+  const siteFilter = sourceSite ? `AND ${siteFilterColumn} = $10` : '';
   const params: unknown[] = [
     pgvector.toSql(queryEmbedding),
     userId,
     queryText,
     Math.max(1, limit),
-    wSim, wImp, wRec, refTime,
+    wSim, wImp, wRec, refTime, rankingMinSimilarity,
   ];
   if (sourceSite) params.push(sourceSite);
-  return { params, siteFilter, refTime, wSim, wImp, wRec };
+  return { params, siteFilter, refTime, wSim, wImp, wRec, rankingMinSimilarity };
 }
 
 /**
  * Build shared query parameters for a vector-only scored search.
  *
- * Returns params in order: $1=embedding, $2=userId, $3=limit, $4=wSim, $5=wImp, $6=wRec, $7=refTime, [$8=sourceSite]
+ * Returns params in order: $1=embedding, $2=userId, $3=limit, $4=wSim, $5=wImp, $6=wRec, $7=refTime, $8=rankingMinSimilarity, [$9=sourceSite]
  */
 export function buildVectorSearchParams(
   queryEmbedding: number[],
@@ -67,16 +69,17 @@ export function buildVectorSearchParams(
   limit: number,
   sourceSite?: string,
   referenceTime?: Date,
-): { params: unknown[]; siteClause: string; wSim: number; wImp: number; wRec: number; refTime: string } {
+): { params: unknown[]; siteClause: string; wSim: number; wImp: number; wRec: number; rankingMinSimilarity: number; refTime: string } {
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
+  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
   const refTime = (referenceTime ?? new Date()).toISOString();
-  const siteClause = sourceSite ? 'AND source_site = $8' : '';
+  const siteClause = sourceSite ? 'AND source_site = $9' : '';
   const params: unknown[] = [
     pgvector.toSql(queryEmbedding), userId, Math.max(1, Math.min(100, limit)),
-    wSim, wImp, wRec, refTime,
+    wSim, wImp, wRec, refTime, rankingMinSimilarity,
   ];
   if (sourceSite) params.push(sourceSite);
-  return { params, siteClause, wSim, wImp, wRec, refTime };
+  return { params, siteClause, wSim, wImp, wRec, rankingMinSimilarity, refTime };
 }

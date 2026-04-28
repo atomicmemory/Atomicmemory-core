@@ -108,13 +108,14 @@ export async function searchVectorsInWorkspace(
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
+  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
   const refTime = (referenceTime ?? new Date()).toISOString();
 
   const params: unknown[] = [
     pgvector.toSql(queryEmbedding), workspaceId, normalizeLimit(limit),
-    wSim, wImp, wRec, refTime,
+    wSim, wImp, wRec, refTime, rankingMinSimilarity,
   ];
-  let nextParam = 8;
+  let nextParam = 9;
 
   const agentClause = buildAgentScopeClause(agentScope, callerAgentId, params, nextParam);
   nextParam += agentClause.paramsAdded;
@@ -126,8 +127,10 @@ export async function searchVectorsInWorkspace(
        1 - (embedding <=> $1) AS similarity,
        (
          $4 * (1 - (embedding <=> $1))
-         + $5 * importance
-         + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+         + CASE WHEN (1 - (embedding <=> $1)) >= $8 THEN (
+           $5 * importance
+           + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+         ) ELSE 0 END
        ) * COALESCE(trust_score, 1.0) AS score
      FROM memories
      WHERE workspace_id = $2
@@ -250,8 +253,10 @@ async function searchVectorsPg(
        1 - (embedding <=> $1) AS similarity,
        (
          $4 * (1 - (embedding <=> $1))
-         + $5 * importance
-         + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+         + CASE WHEN (1 - (embedding <=> $1)) >= $8 THEN (
+           $5 * importance
+           + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+         ) ELSE 0 END
        ) * COALESCE(trust_score, 1.0) AS score
      FROM memories
      WHERE user_id = $2
@@ -359,8 +364,10 @@ async function searchHybridPg(
        1 - (m.embedding <=> $1) AS similarity,
        (
          $5 * (1 - (m.embedding <=> $1))
-         + $6 * m.importance
-         + $7 * EXP(-EXTRACT(EPOCH FROM ($8::timestamptz - m.last_accessed_at)) / 2592000.0)
+         + CASE WHEN (1 - (m.embedding <=> $1)) >= $9 THEN (
+           $6 * m.importance
+           + $7 * EXP(-EXTRACT(EPOCH FROM ($8::timestamptz - m.last_accessed_at)) / 2592000.0)
+         ) ELSE 0 END
          + ${config.retrievalProfileSettings.lexicalWeight} * f.rrf_score
        ) * COALESCE(m.trust_score, 1.0) AS score
      FROM fused f
@@ -471,9 +478,10 @@ function computeScore(similarity: number, importance: number, lastAccessedAt: Da
   const refMs = referenceTime ? referenceTime.getTime() : Date.now();
   const secondsSinceAccess = (refMs - lastAccessedAt.getTime()) / 1000;
   const recency = Math.exp(-secondsSinceAccess / 2592000.0);
-  return (config.scoringWeightSimilarity * similarity)
-    + (config.scoringWeightImportance * importance)
-    + (config.scoringWeightRecency * recency);
+  const nonSemanticScore = similarity >= config.retrievalProfileSettings.rankingMinSimilarity
+    ? (config.scoringWeightImportance * importance) + (config.scoringWeightRecency * recency)
+    : 0;
+  return (config.scoringWeightSimilarity * similarity) + nonSemanticScore;
 }
 
 function approximateCosineSimilarity(left: number[], right: number[]): number {
