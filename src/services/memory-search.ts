@@ -18,8 +18,39 @@ import { TraceCollector } from './retrieval-trace.js';
 import { excludeStaleComposites } from './composite-staleness.js';
 import { applyFlatPackagingPolicy } from './composite-dedup.js';
 import { recordSearchSideEffects } from './retrieval-side-effects.js';
+import {
+  applyRelevanceFilter,
+  resolveRelevanceGate,
+  type RelevanceFilterDecision,
+} from './relevance-policy.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
+
+interface RelevanceFilterSummary {
+  threshold: number | null;
+  source: string;
+  reason: string;
+  queryLabel: string;
+  removedIds: string[];
+  decisions: RelevanceFilterDecision[];
+}
+
+interface PostProcessedSearch {
+  memories: SearchResult[];
+  consensusResult?: ConsensusResult;
+  relevanceFilter: RelevanceFilterSummary;
+}
+
+interface PackagedSearchOutput {
+  mode: RetrievalOptions['retrievalMode'];
+  outputMemories: SearchResult[];
+  injectionText: string;
+  tierAssignments: ReturnType<typeof buildInjection>['tierAssignments'];
+  expandIds: ReturnType<typeof buildInjection>['expandIds'];
+  estimatedContextTokens: ReturnType<typeof buildInjection>['estimatedContextTokens'];
+  packagingSummary: ReturnType<typeof finalizePackagingTrace>['packagingSummary'];
+  assemblySummary: ReturnType<typeof finalizePackagingTrace>['assemblySummary'];
+}
 
 /** Check lessons safety gate; returns undefined if lessons disabled. */
 async function checkSearchLessons(deps: MemoryServiceDeps, userId: string, query: string): Promise<LessonCheckResult | undefined> {
@@ -89,7 +120,8 @@ async function postProcessResults(
   userId: string,
   query: string,
   asOf: string | undefined,
-): Promise<{ memories: SearchResult[]; consensusResult?: ConsensusResult }> {
+  retrievalOptions: RetrievalOptions | undefined,
+): Promise<PostProcessedSearch> {
   let memories = rawMemories.filter((m) => !m.workspace_id);
 
   if (!asOf) {
@@ -103,31 +135,63 @@ async function postProcessResults(
     }
   }
 
-  if (!deps.config.consensusValidationEnabled || memories.length < deps.config.consensusMinMemories) {
-    return { memories };
-  }
+  let consensusResult: ConsensusResult | undefined;
 
-  const consensusResult = await validateConsensus(query, memories);
-  if (consensusResult.removedMemoryIds.length > 0) {
-    const removedSet = new Set(consensusResult.removedMemoryIds);
-    memories = memories.filter((m) => !removedSet.has(m.id));
-    activeTrace.stage('consensus-filter', memories, {
-      removedCount: consensusResult.removedMemoryIds.length,
-      removedIds: consensusResult.removedMemoryIds,
-    });
-    if (deps.config.lessonsEnabled && deps.stores.lesson) {
-      recordConsensusLessons(deps.stores.lesson, userId, consensusResult, memories).catch(
-        (err) => console.error('Consensus lesson recording failed:', err),
-      );
+  if (deps.config.consensusValidationEnabled && memories.length >= deps.config.consensusMinMemories) {
+    consensusResult = await validateConsensus(query, memories);
+    if (consensusResult.removedMemoryIds.length > 0) {
+      const removedSet = new Set(consensusResult.removedMemoryIds);
+      memories = memories.filter((m) => !removedSet.has(m.id));
+      activeTrace.stage('consensus-filter', memories, {
+        removedCount: consensusResult.removedMemoryIds.length,
+        removedIds: consensusResult.removedMemoryIds,
+      });
+      if (deps.config.lessonsEnabled && deps.stores.lesson) {
+        recordConsensusLessons(deps.stores.lesson, userId, consensusResult, memories).catch(
+          (err) => console.error('Consensus lesson recording failed:', err),
+        );
+      }
     }
   }
-  return { memories, consensusResult };
+
+  const relevanceFilter = applySearchRelevanceFilter(
+    memories,
+    activeTrace,
+    query,
+    retrievalOptions,
+    deps.config,
+  );
+  return { memories: relevanceFilter.memories, consensusResult, relevanceFilter };
+}
+
+function applySearchRelevanceFilter(
+  memories: SearchResult[],
+  activeTrace: TraceCollector,
+  query: string,
+  retrievalOptions: RetrievalOptions | undefined,
+  runtimeConfig: MemoryServiceDeps['config'],
+): RelevanceFilterSummary & { memories: SearchResult[] } {
+  const gate = resolveRelevanceGate(query, retrievalOptions?.relevanceThreshold, runtimeConfig);
+  const result = applyRelevanceFilter(memories, gate);
+  const summary = {
+    threshold: gate.threshold,
+    source: gate.source,
+    reason: gate.reason,
+    queryLabel: gate.queryLabel,
+    removedIds: result.removedIds,
+    decisions: result.decisions,
+  };
+  activeTrace.stage('relevance-filter', result.memories, {
+    ...summary,
+    removedCount: result.removedIds.length,
+  });
+  return { ...summary, memories: result.memories };
 }
 
 /** Package memories, build injection text, and assemble the final response. */
 function assembleResponse(
   deps: MemoryServiceDeps,
-  postProcessed: { memories: SearchResult[]; consensusResult?: ConsensusResult },
+  postProcessed: PostProcessedSearch,
   query: string,
   userId: string,
   activeTrace: TraceCollector,
@@ -136,28 +200,74 @@ function assembleResponse(
   sourceSite: string | undefined,
   lessonCheck: LessonCheckResult | undefined,
 ): RetrievalResult {
+  const packaged = packageSearchOutput(postProcessed, query, activeTrace, retrievalOptions);
+  recordSearchSideEffects(deps, packaged.outputMemories, userId, query, sourceSite, asOf);
+  updateRetrievalSummary(activeTrace, packaged.outputMemories, query, retrievalOptions, postProcessed.relevanceFilter);
+  activeTrace.finalize(packaged.outputMemories);
+  return buildRetrievalResult(postProcessed, packaged, activeTrace, lessonCheck);
+}
+
+function packageSearchOutput(
+  postProcessed: PostProcessedSearch,
+  query: string,
+  activeTrace: TraceCollector,
+  retrievalOptions: RetrievalOptions | undefined,
+): PackagedSearchOutput {
   const mode = retrievalOptions?.retrievalMode ?? 'flat';
   const packaged = applyFlatPackagingPolicy(postProcessed.memories, query, mode, activeTrace);
   const outputMemories = isCurrentStateQuery(query) ? packaged.sort((a, b) => b.score - a.score) : packaged;
-
-  recordSearchSideEffects(deps, outputMemories, userId, query, sourceSite, asOf);
-
   const { injectionText, tierAssignments, expandIds, estimatedContextTokens } =
     buildInjection(outputMemories, query, mode, retrievalOptions?.tokenBudget);
   const { packagingSummary, assemblySummary } = finalizePackagingTrace(activeTrace, {
     outputMemories, mode, injectionText, estimatedContextTokens, tierAssignments,
     tokenBudget: retrievalOptions?.tokenBudget,
   });
-  activeTrace.finalize(outputMemories);
-
   return {
-    memories: outputMemories, injectionText,
-    citations: buildRichCitations(outputMemories).map((c) => c.memory_id),
-    retrievalMode: mode, tierAssignments, expandIds, estimatedContextTokens,
+    mode, outputMemories, injectionText, tierAssignments, expandIds,
+    estimatedContextTokens, packagingSummary, assemblySummary,
+  };
+}
+
+function updateRetrievalSummary(
+  activeTrace: TraceCollector,
+  outputMemories: SearchResult[],
+  query: string,
+  retrievalOptions: RetrievalOptions | undefined,
+  relevanceFilter: RelevanceFilterSummary,
+): void {
+  const priorSummary = activeTrace.getRetrievalSummary();
+  activeTrace.setRetrievalSummary({
+    candidateIds: outputMemories.map((memory) => memory.id),
+    candidateCount: outputMemories.length,
+    queryText: priorSummary?.queryText ?? query,
+    skipRepair: priorSummary?.skipRepair ?? retrievalOptions?.skipRepairLoop ?? false,
+    relevanceThreshold: relevanceFilter.threshold,
+    relevanceFilterSource: relevanceFilter.source,
+    relevanceFilterReason: relevanceFilter.reason,
+    filteredCandidateIds: relevanceFilter.removedIds,
+    filterDecisions: relevanceFilter.decisions,
+  });
+}
+
+function buildRetrievalResult(
+  postProcessed: PostProcessedSearch,
+  packaged: PackagedSearchOutput,
+  activeTrace: TraceCollector,
+  lessonCheck: LessonCheckResult | undefined,
+): RetrievalResult {
+  return {
+    memories: packaged.outputMemories,
+    injectionText: packaged.injectionText,
+    citations: buildRichCitations(packaged.outputMemories).map((c) => c.memory_id),
+    retrievalMode: packaged.mode ?? 'flat',
+    tierAssignments: packaged.tierAssignments,
+    expandIds: packaged.expandIds,
+    estimatedContextTokens: packaged.estimatedContextTokens,
     lessonCheck, consensusResult: postProcessed.consensusResult,
-    packagingSignal: computePackagingSignal(outputMemories),
+    packagingSignal: computePackagingSignal(packaged.outputMemories),
     retrievalSummary: activeTrace.getRetrievalSummary(),
-    packagingSummary, assemblySummary,
+    packagingSummary: packaged.packagingSummary,
+    assemblySummary: packaged.assemblySummary,
   };
 }
 
@@ -186,7 +296,7 @@ export async function performSearch(
   if (uriResult) return uriResult;
 
   const { memories: rawMemories, activeTrace } = await executeSearchStep(deps, userId, query, effectiveLimit, sourceSite, referenceTime, namespaceScope, retrievalOptions, asOf, trace);
-  const filteredMemories = await postProcessResults(deps, rawMemories, activeTrace, userId, query, asOf);
+  const filteredMemories = await postProcessResults(deps, rawMemories, activeTrace, userId, query, asOf, retrievalOptions);
   return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
 }
 
@@ -202,10 +312,12 @@ export async function performFastSearch(
   sourceSite?: string,
   limit?: number,
   namespaceScope?: string,
+  retrievalOptions?: RetrievalOptions,
 ): Promise<RetrievalResult> {
   const label = classifyQueryDetailed(query).label;
   const escalate = label === 'multi-hop' || label === 'aggregation' || label === 'complex';
   return performSearch(deps, userId, query, sourceSite, limit, undefined, undefined, namespaceScope, {
+    ...retrievalOptions,
     skipRepairLoop: !escalate,
     skipReranking: !escalate,
   });
@@ -234,7 +346,9 @@ export async function performWorkspaceSearch(
     workspace.workspaceId, queryEmbedding, effectiveLimit,
     options.agentScope ?? 'all', workspace.agentId, options.referenceTime,
   );
-  const { filtered: filteredMemories } = await excludeStaleComposites(deps.stores.memory, userId, memories);
+  const { filtered: staleFilteredMemories } = await excludeStaleComposites(deps.stores.memory, userId, memories);
+  const gate = resolveRelevanceGate(query, options.retrievalOptions?.relevanceThreshold, deps.config);
+  const { memories: filteredMemories } = applyRelevanceFilter(staleFilteredMemories, gate);
   for (const m of filteredMemories) deps.stores.memory.touchMemory(m.id).catch(() => {});
 
   const mode = options.retrievalOptions?.retrievalMode ?? 'flat';

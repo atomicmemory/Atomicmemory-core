@@ -16,7 +16,14 @@
  * first.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.hoisted(() => {
+  process.env.OPENAI_API_KEY ??= 'test-openai-key';
+  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
+  process.env.EMBEDDING_DIMENSIONS ??= '1536';
+});
+
 import type { Router } from 'express';
 import { createMemoryRouter } from '../memories';
 import { createAgentRouter } from '../agents';

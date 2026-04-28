@@ -197,6 +197,8 @@ export interface RetrievalOptions {
   retrievalMode?: RetrievalMode;
   tokenBudget?: number;
   searchStrategy?: SearchStrategy;
+  /** Minimum normalized relevance required before injection packaging. */
+  relevanceThreshold?: number;
   /** Skip the LLM repair loop for latency-critical paths. */
   skipRepairLoop?: boolean;
   /** Skip cross-encoder reranking for latency-critical paths. */

@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
 import type { SearchResult } from '../db/memory-repository.js';
+import type { RelevanceFilterDecision } from './relevance-policy.js';
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const DEFAULT_TRACE_DIR = resolve(__dirname, '../../.traces');
@@ -20,7 +21,13 @@ const DEFAULT_TRACE_DIR = resolve(__dirname, '../../.traces');
 interface TracedMemory {
   id: string;
   similarity: number;
+  semanticSimilarity: number;
   score: number;
+  rankingScore: number;
+  relevance: number;
+  importance: number;
+  sourceSite: string;
+  namespace: string | null;
   contentPreview: string;
   tier?: string;
 }
@@ -53,6 +60,11 @@ export interface RetrievalTraceSummary {
   candidateCount: number;
   queryText: string;
   skipRepair: boolean;
+  relevanceThreshold?: number | null;
+  relevanceFilterSource?: string;
+  relevanceFilterReason?: string;
+  filteredCandidateIds?: string[];
+  filterDecisions?: RelevanceFilterDecision[];
   traceId?: string;
   stageCount?: number;
   stageNames?: string[];
@@ -87,7 +99,13 @@ function snapshotMemories(results: SearchResult[]): TracedMemory[] {
   return results.map((r) => ({
     id: r.id,
     similarity: round4(r.similarity),
+    semanticSimilarity: round4(r.semantic_similarity ?? r.similarity),
     score: round4(r.score),
+    rankingScore: round4(r.ranking_score ?? r.score),
+    relevance: round4(r.relevance ?? r.similarity),
+    importance: round4(r.importance),
+    sourceSite: r.source_site,
+    namespace: r.namespace ?? null,
     contentPreview: r.content.slice(0, CONTENT_PREVIEW_LENGTH),
     // @ts-expect-error -- tier might be present if added by tiered loading
     tier: r.tier,
@@ -201,19 +219,18 @@ export class TraceCollector {
 
   private persistTrace(trace: RetrievalTrace): void {
     try {
-      const traceDir = process.env.RETRIEVAL_TRACE_DIR ?? DEFAULT_TRACE_DIR;
-      if (!existsSync(traceDir)) {
-        mkdirSync(traceDir, { recursive: true });
-      }
-
-      const filename = `${trace.traceId}.json`;
-      const filePath = join(traceDir, filename);
-      writeFileSync(filePath, JSON.stringify(trace, null, 2));
-      
-      // Also log a summary line to stdout for visibility during runs
+      const filename = writeTraceArtifact(trace);
       console.log(`[trace] Saved retrieval trace: ${filename} (${trace.durationMs}ms, ${trace.stages.length} stages)`);
     } catch (err) {
       console.error('[trace] Failed to persist retrieval trace:', err);
     }
   }
+}
+
+function writeTraceArtifact(trace: RetrievalTrace): string {
+  const traceDir = process.env.RETRIEVAL_TRACE_DIR ?? DEFAULT_TRACE_DIR;
+  if (!existsSync(traceDir)) mkdirSync(traceDir, { recursive: true });
+  const filename = `${trace.traceId}.json`;
+  writeFileSync(join(traceDir, filename), JSON.stringify(trace, null, 2));
+  return filename;
 }

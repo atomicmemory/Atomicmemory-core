@@ -287,9 +287,15 @@ function registerSearchRoute(
   router.post('/search', validateBody(SearchBodySchema), async (req: Request, res: Response) => {
     try {
       const { body, effectiveConfig, scope, requestLimit } = readSearchRequest(req, res, configRouteAdapter);
-      const retrievalOptions: { retrievalMode?: SearchBody['retrievalMode']; tokenBudget?: SearchBody['tokenBudget']; skipRepairLoop?: boolean } = {
+      const retrievalOptions: {
+        retrievalMode?: SearchBody['retrievalMode'];
+        tokenBudget?: SearchBody['tokenBudget'];
+        relevanceThreshold?: SearchBody['relevanceThreshold'];
+        skipRepairLoop?: boolean;
+      } = {
         retrievalMode: body.retrievalMode,
         tokenBudget: body.tokenBudget,
+        relevanceThreshold: body.relevanceThreshold,
         ...(body.skipRepair ? { skipRepairLoop: true } : {}),
       };
       const result = await service.scopedSearch(scope, body.query, {
@@ -319,11 +325,15 @@ function registerFastSearchRoute(
   router.post('/search/fast', validateBody(SearchBodySchema), async (req: Request, res: Response) => {
     try {
       const { body, effectiveConfig, scope, requestLimit } = readSearchRequest(req, res, configRouteAdapter);
+      const retrievalOptions = {
+        relevanceThreshold: body.relevanceThreshold,
+      };
       const result = await service.scopedSearch(scope, body.query, {
         fast: true,
         sourceSite: body.sourceSite,
         limit: requestLimit,
         namespaceScope: body.namespaceScope,
+        retrievalOptions,
         effectiveConfig,
       });
       res.json(formatSearchResponse(result, scope));
@@ -789,6 +799,9 @@ function formatSearchResponse(result: RetrievalResult, scope: MemoryScope) {
       content: memory.content,
       similarity: memory.similarity,
       score: memory.score,
+      semantic_similarity: memory.semantic_similarity ?? memory.similarity,
+      ranking_score: memory.ranking_score ?? memory.score,
+      relevance: memory.relevance ?? memory.similarity,
       importance: memory.importance,
       source_site: memory.source_site,
       created_at: memory.created_at,

@@ -277,11 +277,30 @@ export async function runSearchPipelineWithTrace(
   if (namespaceScope) {
     trace.event('namespace-filtering', { scope: namespaceScope });
   }
-  const filtered = namespaceScope
-    ? selected.filter((r) => isInScope(r.namespace, namespaceScope))
-    : selected;
+  const filtered = applyNamespaceScopeFilter(selected, namespaceScope, trace);
 
   return { filtered, trace };
+}
+
+function applyNamespaceScopeFilter(
+  selected: SearchResult[],
+  namespaceScope: string | null,
+  trace: TraceCollector,
+): SearchResult[] {
+  if (!namespaceScope) return selected;
+  const decisions = selected.map((result) => ({
+    id: result.id,
+    namespace: result.namespace ?? null,
+    sourceSite: result.source_site,
+    decision: isInScope(result.namespace, namespaceScope) ? 'kept' : 'filtered',
+  }));
+  const filtered = selected.filter((result) => isInScope(result.namespace, namespaceScope));
+  trace.stage('namespace-filter', filtered, {
+    scope: namespaceScope,
+    removedIds: decisions.filter((decision) => decision.decision === 'filtered').map((decision) => decision.id),
+    decisions,
+  });
+  return filtered;
 }
 
 async function runInitialRetrieval(

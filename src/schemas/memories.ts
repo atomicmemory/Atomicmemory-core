@@ -131,14 +131,7 @@ const SearchBodyLimit = z
   .openapi({ type: 'integer', minimum: 1, maximum: MAX_SEARCH_LIMIT });
 
 /** token_budget: finite number in [100, 50000], floored. Throws on invalid. */
-const TokenBudgetSchema = z
-  .preprocess(v => (v === undefined || v === null ? undefined : v), z.unknown().optional())
-  .refine(
-    v =>
-      v === undefined ||
-      (typeof v === 'number' && Number.isFinite(v)),
-    { message: 'token_budget must be a finite number' },
-  )
+const TokenBudgetSchema = optionalFiniteNumber('token_budget')
   .refine(
     v =>
       v === undefined ||
@@ -151,6 +144,32 @@ const TokenBudgetSchema = z
   )
   .transform(v => (typeof v === 'number' ? Math.floor(v) : undefined))
   .openapi({ type: 'integer', minimum: MIN_TOKEN_BUDGET, maximum: MAX_TOKEN_BUDGET });
+
+/** threshold: normalized relevance floor in [0, 1]. Throws on invalid. */
+const SearchThresholdSchema = optionalFiniteNumber('threshold')
+  .refine(
+    v => v === undefined || (v >= 0 && v <= 1),
+    { message: 'threshold must be between 0 and 1' },
+  )
+  .transform(v => (typeof v === 'number' ? v : undefined))
+  .openapi({
+    type: 'number',
+    minimum: 0,
+    maximum: 1,
+    description:
+      'Optional normalized relevance threshold. Results below this semantic relevance floor are excluded before injection packaging.',
+  });
+
+function optionalFiniteNumber(label: string) {
+  return z
+    .preprocess(v => (v === undefined || v === null ? undefined : v), z.unknown().optional())
+    .refine(
+      (v): v is number | undefined =>
+        v === undefined ||
+        (typeof v === 'number' && Number.isFinite(v)),
+      { message: `${label} must be a finite number` },
+    );
+}
 
 /**
  * retrieval_mode: string enum or undefined. Absent/null → undefined;
@@ -321,6 +340,7 @@ export const SearchBodySchema = z
     as_of: IsoTimestamp,
     retrieval_mode: RetrievalModeField,
     token_budget: TokenBudgetSchema,
+    threshold: SearchThresholdSchema,
     namespace_scope: OptionalBodyString,
     skip_repair: OptionalBooleanField(),
     workspace_id: WorkspaceIdField,
@@ -337,6 +357,7 @@ export const SearchBodySchema = z
     asOf: b.as_of,
     retrievalMode: b.retrieval_mode,
     tokenBudget: b.token_budget,
+    relevanceThreshold: b.threshold,
     namespaceScope: b.namespace_scope,
     skipRepair: b.skip_repair === true,
     workspace: buildWorkspaceContext(b.workspace_id, b.agent_id, b.visibility),
