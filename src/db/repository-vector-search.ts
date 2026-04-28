@@ -13,7 +13,7 @@ import {
   type SearchResult,
   type WorkspaceContext,
 } from './repository-types.js';
-import { RRF_K, buildHybridSearchParams, buildVectorSearchParams } from './query-helpers.js';
+import { RRF_K, buildHybridSearchParams, buildVectorSearchParams, clampUnit } from './query-helpers.js';
 import { cosineSimilarity } from '../vector-math.js';
 
 export interface CandidateRow {
@@ -108,7 +108,7 @@ export async function searchVectorsInWorkspace(
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
-  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
+  const rankingMinSimilarity = clampUnit(config.retrievalProfileSettings.rankingMinSimilarity);
   const refTime = (referenceTime ?? new Date()).toISOString();
 
   const params: unknown[] = [
@@ -368,6 +368,7 @@ async function searchHybridPg(
            $6 * m.importance
            + $7 * EXP(-EXTRACT(EPOCH FROM ($8::timestamptz - m.last_accessed_at)) / 2592000.0)
          ) ELSE 0 END
+         -- Lexical RRF stays outside the semantic boost gate because exact text match is itself a relevance signal.
          + ${config.retrievalProfileSettings.lexicalWeight} * f.rrf_score
        ) * COALESCE(m.trust_score, 1.0) AS score
      FROM fused f
@@ -478,7 +479,7 @@ function computeScore(similarity: number, importance: number, lastAccessedAt: Da
   const refMs = referenceTime ? referenceTime.getTime() : Date.now();
   const secondsSinceAccess = (refMs - lastAccessedAt.getTime()) / 1000;
   const recency = Math.exp(-secondsSinceAccess / 2592000.0);
-  const nonSemanticScore = similarity >= config.retrievalProfileSettings.rankingMinSimilarity
+  const nonSemanticScore = similarity >= clampUnit(config.retrievalProfileSettings.rankingMinSimilarity)
     ? (config.scoringWeightImportance * importance) + (config.scoringWeightRecency * recency)
     : 0;
   return (config.scoringWeightSimilarity * similarity) + nonSemanticScore;

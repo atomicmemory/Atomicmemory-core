@@ -44,7 +44,7 @@ export function buildHybridSearchParams(
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
-  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
+  const rankingMinSimilarity = clampUnit(config.retrievalProfileSettings.rankingMinSimilarity);
   const refTime = (referenceTime ?? new Date()).toISOString();
   const siteFilter = sourceSite ? `AND ${siteFilterColumn} = $10` : '';
   const params: unknown[] = [
@@ -73,7 +73,7 @@ export function buildVectorSearchParams(
   const wSim = config.scoringWeightSimilarity;
   const wImp = config.scoringWeightImportance;
   const wRec = config.scoringWeightRecency;
-  const rankingMinSimilarity = config.retrievalProfileSettings.rankingMinSimilarity;
+  const rankingMinSimilarity = clampUnit(config.retrievalProfileSettings.rankingMinSimilarity);
   const refTime = (referenceTime ?? new Date()).toISOString();
   const siteClause = sourceSite ? 'AND source_site = $9' : '';
   const params: unknown[] = [
@@ -82,4 +82,9 @@ export function buildVectorSearchParams(
   ];
   if (sourceSite) params.push(sourceSite);
   return { params, siteClause, wSim, wImp, wRec, rankingMinSimilarity, refTime };
+}
+
+export function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }

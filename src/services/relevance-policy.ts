@@ -3,8 +3,7 @@
  */
 
 import type { SearchResult } from '../db/repository-types.js';
-import { isCurrentStateQuery, isHistoricalQuery } from './current-state-ranking.js';
-import { classifyQueryDetailed, type QueryComplexityLabel } from './retrieval-policy.js';
+import { classifyQueryDetailed, resolveRecallBypass, type QueryComplexityLabel } from './retrieval-policy.js';
 
 export interface RelevanceGateConfig {
   similarityThreshold: number;
@@ -47,7 +46,6 @@ type ScoredSearchResult = SearchResult & {
   relevance: number;
 };
 
-const RECALL_ORIENTED_QUERY_LABELS = new Set<QueryComplexityLabel>(['complex', 'multi-hop', 'aggregation']);
 const INTEGRATION_SOURCE_PREFIXES = ['integration-', 'integration_', 'integration:', 'integration/'];
 const KNOWN_INTEGRATION_SOURCE_SITES = new Set([
   'integration',
@@ -75,18 +73,8 @@ export function resolveRelevanceGate(
   if (requestedThreshold !== undefined) {
     return buildGate(requestedThreshold, 'request', 'caller-threshold', queryLabel);
   }
-  if (context.asOf) {
-    return { threshold: null, source: 'disabled', reason: 'as-of-query', queryLabel };
-  }
-  if (context.sourceSite) {
-    return { threshold: null, source: 'disabled', reason: 'source-site-filter', queryLabel };
-  }
-  if (isCurrentStateQuery(query) || isHistoricalQuery(query)) {
-    return { threshold: null, source: 'disabled', reason: 'temporal-state-query', queryLabel };
-  }
-  if (RECALL_ORIENTED_QUERY_LABELS.has(queryLabel)) {
-    return { threshold: null, source: 'disabled', reason: `recall-oriented-${queryLabel}-query`, queryLabel };
-  }
+  const bypassReason = resolveRecallBypass(query, queryLabel, context);
+  if (bypassReason) return { threshold: null, source: 'disabled', reason: bypassReason, queryLabel };
   return buildGate(runtimeConfig.similarityThreshold, 'config', 'direct-query-default', queryLabel);
 }
 

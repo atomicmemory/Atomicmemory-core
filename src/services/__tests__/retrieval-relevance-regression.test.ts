@@ -12,11 +12,13 @@ const {
   mockRunSearchPipelineWithTrace,
   mockResolveSearchLimitDetailed,
   mockClassifyQueryDetailed,
+  mockResolveRecallBypass,
   mockEmbedText,
 } = vi.hoisted(() => ({
   mockRunSearchPipelineWithTrace: vi.fn(),
   mockResolveSearchLimitDetailed: vi.fn(),
   mockClassifyQueryDetailed: vi.fn(),
+  mockResolveRecallBypass: vi.fn(),
   mockEmbedText: vi.fn(),
 }));
 
@@ -24,6 +26,7 @@ vi.mock('../search-pipeline.js', () => ({ runSearchPipelineWithTrace: mockRunSea
 vi.mock('../retrieval-policy.js', () => ({
   resolveSearchLimitDetailed: mockResolveSearchLimitDetailed,
   classifyQueryDetailed: mockClassifyQueryDetailed,
+  resolveRecallBypass: mockResolveRecallBypass,
 }));
 vi.mock('../embedding.js', () => ({ embedText: mockEmbedText }));
 vi.mock('../composite-staleness.js', () => ({
@@ -45,6 +48,11 @@ describe('retrieval relevance regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClassifyQueryDetailed.mockImplementation(classifyFixtureQuery);
+    mockResolveRecallBypass.mockImplementation((_query: string, label: string, context: { asOf?: string; referenceTime?: Date; sourceSite?: string }) => {
+      if (context.asOf || context.referenceTime) return 'as-of-query';
+      if (context.sourceSite) return 'source-site-filter';
+      return ['complex', 'multi-hop', 'aggregation'].includes(label) ? `recall-oriented-${label}-query` : null;
+    });
     mockEmbedText.mockResolvedValue([1, 0, 0]);
     mockResolveSearchLimitDetailed.mockImplementation((query: string, limit?: number) => ({
       limit: limit ?? 5,

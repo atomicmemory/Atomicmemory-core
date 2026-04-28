@@ -248,6 +248,7 @@ export async function searchAtomicFactsHybrid(
            $6 * m.importance
            + $7 * EXP(-EXTRACT(EPOCH FROM ($8::timestamptz - m.last_accessed_at)) / 2592000.0)
          ) ELSE 0 END
+         -- Lexical RRF stays outside the semantic boost gate because exact text match is itself a relevance signal.
          + ${config.retrievalProfileSettings.lexicalWeight} * p.best_rrf_score
        ) * COALESCE(m.trust_score, 1.0) AS score,
        p.matched_facts,

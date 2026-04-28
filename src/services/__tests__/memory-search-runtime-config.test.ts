@@ -33,6 +33,7 @@ vi.mock('../retrieval-policy.js', () => ({
     classification: { label: 'simple', matchedMarker: null },
   })),
   classifyQueryDetailed: vi.fn(() => ({ label: 'simple' })),
+  resolveRecallBypass: vi.fn(() => null),
 }));
 vi.mock('../search-pipeline.js', () => ({
   runSearchPipelineWithTrace: mockRunSearchPipelineWithTrace,
