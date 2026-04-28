@@ -41,7 +41,7 @@ type ScoredSearchResult = SearchResult & {
   relevance: number;
 };
 
-const BROAD_QUERY_LABELS = new Set<QueryComplexityLabel>(['aggregation', 'multi-hop']);
+const RECALL_ORIENTED_QUERY_LABELS = new Set<QueryComplexityLabel>(['complex', 'multi-hop', 'aggregation']);
 const INTEGRATION_SOURCE_PREFIXES = ['integration-', 'integration_', 'integration:', 'integration/'];
 const KNOWN_INTEGRATION_SOURCE_SITES = new Set([
   'integration',
@@ -66,8 +66,8 @@ export function resolveRelevanceGate(
   if (requestedThreshold !== undefined) {
     return buildGate(requestedThreshold, 'request', 'caller-threshold', queryLabel);
   }
-  if (BROAD_QUERY_LABELS.has(queryLabel)) {
-    return { threshold: null, source: 'disabled', reason: `broad-${queryLabel}-query`, queryLabel };
+  if (RECALL_ORIENTED_QUERY_LABELS.has(queryLabel)) {
+    return { threshold: null, source: 'disabled', reason: `recall-oriented-${queryLabel}-query`, queryLabel };
   }
   return buildGate(runtimeConfig.similarityThreshold, 'config', 'direct-query-default', queryLabel);
 }

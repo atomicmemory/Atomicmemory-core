@@ -39,6 +39,7 @@ const { performSearch, performWorkspaceSearch } = await import('../memory-search
 const { config } = await import('../../config.js');
 
 const TEST_USER = 'retrieval-relevance-regression-user';
+const DIRECT_FACT_PRECISION_FLOOR = 1;
 
 describe('retrieval relevance regression', () => {
   beforeEach(() => {
@@ -70,7 +71,7 @@ describe('retrieval relevance regression', () => {
 
     const ids = result.memories.map((memory) => memory.id);
     expect(ids).toEqual([fixture.answer.id]);
-    expect(precisionAtK(ids, new Set([fixture.answer.id]))).toBe(1);
+    expect(precisionAtK(ids, new Set([fixture.answer.id]))).toBeGreaterThanOrEqual(DIRECT_FACT_PRECISION_FLOOR);
     expect(result.injectionText).toContain('favorite color is teal');
     expect(result.injectionText).not.toContain('spicy ramen');
     expect(result.injectionText).not.toContain('Flight receipts');
@@ -216,25 +217,32 @@ describe('retrieval relevance regression', () => {
   });
 
   it('preserves broad integration retrieval when no caller threshold is supplied', async () => {
-    const fixture = createFavoriteColorNoisyRetrievalFixture();
-    mockRunSearchPipelineWithTrace.mockResolvedValue({
-      filtered: fixture.all,
-      trace: createTrace(fixture.all.map((memory) => memory.id)),
-    });
+    await expectRecallPreservedForQuery('List all synced integration memories');
+  });
 
-    const result = await performSearch(
-      createDeps(0.5),
-      TEST_USER,
-      'List all synced integration memories',
-    );
-
-    expect(result.memories.map((memory) => memory.id)).toEqual(fixture.all.map((memory) => memory.id));
+  it('preserves complex-query recall when no caller threshold is supplied', async () => {
+    await expectRecallPreservedForQuery('Why did my synced context mention color palettes?');
   });
 });
+
+async function expectRecallPreservedForQuery(query: string) {
+  const fixture = createFavoriteColorNoisyRetrievalFixture();
+  mockRunSearchPipelineWithTrace.mockResolvedValue({
+    filtered: fixture.all,
+    trace: createTrace(fixture.all.map((memory) => memory.id)),
+  });
+
+  const result = await performSearch(createDeps(0.5), TEST_USER, query);
+
+  expect(result.memories.map((memory) => memory.id)).toEqual(fixture.all.map((memory) => memory.id));
+}
 
 function classifyFixtureQuery(query: string) {
   if (query.toLowerCase().includes('list all')) {
     return { limit: 25, label: 'aggregation', matchedMarker: 'list all' };
+  }
+  if (query.toLowerCase().startsWith('why')) {
+    return { limit: 8, label: 'complex', matchedMarker: 'why' };
   }
   return { limit: 5, label: 'simple' };
 }
