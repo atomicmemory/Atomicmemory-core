@@ -7,8 +7,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /* vi.hoisted must be per-file (vitest hoisting requirement). */
 const searchMocks = vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
   return { pipeline: vi.fn(), touch: vi.fn(), get: vi.fn(), stage: vi.fn(), event: vi.fn(), finalize: vi.fn() };
 });
 const { pipeline: mockRunSearchPipelineWithTrace, touch: mockTouchMemory, get: mockGetMemory, stage: mockTraceStage, event: mockTraceEvent, finalize: mockTraceFinalize } = searchMocks;

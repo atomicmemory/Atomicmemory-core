@@ -2491,10 +2491,12 @@ paths:
                           description: Memory metadata persisted on the row, including caller-supplied verbatim metadata (set via /v1/memories/ingest/quick with skip_extraction=true) and core-generated metadata (e.g. cmo_id, memberMemoryIds, headline). Mirrors the shape /v1/memories/list and /v1/memories/:id return.
                           type: object
                         ranking_score:
+                          description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
                           type:
                             - number
                             - "null"
                         relevance:
+                          description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
                           type:
                             - number
                             - "null"
@@ -2616,10 +2618,12 @@ paths:
                                     - string
                                     - "null"
                                 ranking_score:
+                                  description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
                                   type: number
                                 reason:
                                   type: string
                                 relevance:
+                                  description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
                                   type: number
                                 semantic_similarity:
                                   type: number
@@ -2926,10 +2930,12 @@ paths:
                           description: Memory metadata persisted on the row, including caller-supplied verbatim metadata (set via /v1/memories/ingest/quick with skip_extraction=true) and core-generated metadata (e.g. cmo_id, memberMemoryIds, headline). Mirrors the shape /v1/memories/list and /v1/memories/:id return.
                           type: object
                         ranking_score:
+                          description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
                           type:
                             - number
                             - "null"
                         relevance:
+                          description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
                           type:
                             - number
                             - "null"
@@ -3051,10 +3057,12 @@ paths:
                                     - string
                                     - "null"
                                 ranking_score:
+                                  description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
                                   type: number
                                 reason:
                                   type: string
                                 relevance:
+                                  description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
                                   type: number
                                 semantic_similarity:
                                   type: number

@@ -14,8 +14,12 @@ export const SearchMemoryItemSchema = z.object({
   similarity: NumberOrNaN.optional(),
   score: NumberOrNaN.optional(),
   semantic_similarity: NumberOrNaN.optional(),
-  ranking_score: NumberOrNaN.optional(),
-  relevance: NumberOrNaN.optional(),
+  ranking_score: NumberOrNaN.optional().openapi({
+    description: 'Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.',
+  }),
+  relevance: NumberOrNaN.optional().openapi({
+    description: 'Normalized relevance value used for threshold filtering; clamped to the [0,1] range.',
+  }),
   importance: NumberOrNaN.optional(),
   source_site: z.string().optional(),
   created_at: IsoDateString.optional(),
@@ -64,8 +68,12 @@ const RetrievalTraceSchema = z.object({
     source_kind: z.enum(['integration', 'local']),
     namespace: z.string().nullable(),
     semantic_similarity: z.number(),
-    ranking_score: z.number(),
-    relevance: z.number(),
+    ranking_score: z.number().openapi({
+      description: 'Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.',
+    }),
+    relevance: z.number().openapi({
+      description: 'Normalized relevance value used for threshold filtering; clamped to the [0,1] range.',
+    }),
     threshold: z.number().nullable(),
     decision: z.enum(['kept', 'filtered']),
     reason: z.string(),

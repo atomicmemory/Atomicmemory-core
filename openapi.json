@@ -3703,12 +3703,14 @@
                             "type": "object"
                           },
                           "ranking_score": {
+                            "description": "Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.",
                             "type": [
                               "number",
                               "null"
                             ]
                           },
                           "relevance": {
+                            "description": "Normalized relevance value used for threshold filtering; clamped to the [0,1] range.",
                             "type": [
                               "number",
                               "null"
@@ -3880,12 +3882,14 @@
                                     ]
                                   },
                                   "ranking_score": {
+                                    "description": "Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.",
                                     "type": "number"
                                   },
                                   "reason": {
                                     "type": "string"
                                   },
                                   "relevance": {
+                                    "description": "Normalized relevance value used for threshold filtering; clamped to the [0,1] range.",
                                     "type": "number"
                                   },
                                   "semantic_similarity": {
@@ -4340,12 +4344,14 @@
                             "type": "object"
                           },
                           "ranking_score": {
+                            "description": "Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.",
                             "type": [
                               "number",
                               "null"
                             ]
                           },
                           "relevance": {
+                            "description": "Normalized relevance value used for threshold filtering; clamped to the [0,1] range.",
                             "type": [
                               "number",
                               "null"
@@ -4517,12 +4523,14 @@
                                     ]
                                   },
                                   "ranking_score": {
+                                    "description": "Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.",
                                     "type": "number"
                                   },
                                   "reason": {
                                     "type": "string"
                                   },
                                   "relevance": {
+                                    "description": "Normalized relevance value used for threshold filtering; clamped to the [0,1] range.",
                                     "type": "number"
                                   },
                                   "semantic_similarity": {

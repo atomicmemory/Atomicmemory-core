@@ -20,16 +20,10 @@
 import express from 'express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
-  process.env.EMBEDDING_DIMENSIONS ??= '1536';
-});
-
-import { createMemoryRouter } from '../routes/memories.js';
-import type { MemoryService } from '../services/memory-service.js';
 import { type BootedApp, bindEphemeral } from '../app/bind-ephemeral.js';
 import { config, type RuntimeConfig } from '../config.js';
+import { createMemoryRouter } from '../routes/memories.js';
+import type { MemoryService } from '../services/memory-service.js';
 
 const ROUTE_CONFIG = {
   retrievalProfile: 'override-test-profile',

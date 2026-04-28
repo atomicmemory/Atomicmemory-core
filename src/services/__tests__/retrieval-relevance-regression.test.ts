@@ -12,27 +12,31 @@ const {
   mockRunSearchPipelineWithTrace,
   mockResolveSearchLimitDetailed,
   mockClassifyQueryDetailed,
+  mockEmbedText,
 } = vi.hoisted(() => ({
   mockRunSearchPipelineWithTrace: vi.fn(),
   mockResolveSearchLimitDetailed: vi.fn(),
   mockClassifyQueryDetailed: vi.fn(),
+  mockEmbedText: vi.fn(),
 }));
-vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
-  process.env.EMBEDDING_DIMENSIONS ??= '1536';
-});
 
 vi.mock('../search-pipeline.js', () => ({ runSearchPipelineWithTrace: mockRunSearchPipelineWithTrace }));
 vi.mock('../retrieval-policy.js', () => ({
   resolveSearchLimitDetailed: mockResolveSearchLimitDetailed,
   classifyQueryDetailed: mockClassifyQueryDetailed,
 }));
+vi.mock('../embedding.js', () => ({ embedText: mockEmbedText }));
 vi.mock('../composite-staleness.js', () => ({
   excludeStaleComposites: vi.fn(passthroughCompositeFilter),
 }));
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn(() => true),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
 
-const { performSearch } = await import('../memory-search.js');
+const { performSearch, performWorkspaceSearch } = await import('../memory-search.js');
+const { config } = await import('../../config.js');
 
 const TEST_USER = 'retrieval-relevance-regression-user';
 
@@ -40,6 +44,7 @@ describe('retrieval relevance regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClassifyQueryDetailed.mockImplementation(classifyFixtureQuery);
+    mockEmbedText.mockResolvedValue([1, 0, 0]);
     mockResolveSearchLimitDetailed.mockImplementation((query: string, limit?: number) => ({
       limit: limit ?? 5,
       classification: classifyFixtureQuery(query),
@@ -132,6 +137,82 @@ describe('retrieval relevance regression', () => {
         ]),
       }),
     );
+  });
+
+  it('does not classify local sources by drive or twitter substrings', async () => {
+    const driverBlog = createSearchResult({
+      id: 'driver-blog-local',
+      content: 'A local article mentions keyboard drivers.',
+      similarity: 0.2,
+      score: 0.99,
+      source_site: 'driver-blog.com',
+    });
+    const twitterishLocal = createSearchResult({
+      id: 'twitterish-local',
+      content: 'A local archive happens to include twitter in its host name.',
+      similarity: 0.2,
+      score: 0.99,
+      source_site: 'not-twitter.example',
+    });
+    const trace = createTrace([driverBlog.id, twitterishLocal.id]);
+    mockRunSearchPipelineWithTrace.mockResolvedValue({ filtered: [driverBlog, twitterishLocal], trace });
+
+    await performSearch(createDeps(0.5), TEST_USER, 'What is my favorite color?');
+
+    expect(trace.stage).toHaveBeenCalledWith(
+      'relevance-filter',
+      [],
+      expect.objectContaining({
+        decisions: expect.arrayContaining([
+          expect.objectContaining({
+            id: driverBlog.id,
+            sourceKind: 'local',
+            reason: 'below-threshold',
+          }),
+          expect.objectContaining({
+            id: twitterishLocal.id,
+            sourceKind: 'local',
+            reason: 'below-threshold',
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it('traces workspace relevance filtering decisions', async () => {
+    const fixture = createFavoriteColorNoisyRetrievalFixture();
+    const workspaceResults = [fixture.answer, fixture.drive];
+    const deps = createDeps(0.5);
+    deps.stores.search.searchSimilarInWorkspace = vi.fn().mockResolvedValue(workspaceResults);
+    const previousTraceEnabled = config.retrievalTraceEnabled;
+    config.retrievalTraceEnabled = true;
+
+    try {
+      const result = await performWorkspaceSearch(
+        deps,
+        TEST_USER,
+        'What is my favorite color?',
+        { workspaceId: 'workspace-1', agentId: 'agent-1' },
+        { retrievalOptions: { relevanceThreshold: 0.5 } },
+      );
+
+      expect(result.memories.map((memory) => memory.id)).toEqual([fixture.answer.id]);
+      expect(result.retrievalSummary).toMatchObject({
+        relevanceThreshold: 0.5,
+        relevanceFilterSource: 'request',
+        filteredCandidateIds: [fixture.drive.id],
+        filterDecisions: expect.arrayContaining([
+          expect.objectContaining({
+            id: fixture.drive.id,
+            sourceKind: 'integration',
+            reason: 'integration-below-threshold',
+          }),
+        ]),
+        stageNames: expect.arrayContaining(['workspace-search', 'relevance-filter', 'final']),
+      });
+    } finally {
+      config.retrievalTraceEnabled = previousTraceEnabled;
+    }
   });
 
   it('preserves broad integration retrieval when no caller threshold is supplied', async () => {

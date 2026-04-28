@@ -42,7 +42,7 @@ interface PostProcessedSearch {
 }
 
 interface PackagedSearchOutput {
-  mode: RetrievalOptions['retrievalMode'];
+  mode: RetrievalResult['retrievalMode'];
   outputMemories: SearchResult[];
   injectionText: string;
   tierAssignments: ReturnType<typeof buildInjection>['tierAssignments'];
@@ -259,7 +259,7 @@ function buildRetrievalResult(
     memories: packaged.outputMemories,
     injectionText: packaged.injectionText,
     citations: buildRichCitations(packaged.outputMemories).map((c) => c.memory_id),
-    retrievalMode: packaged.mode ?? 'flat',
+    retrievalMode: packaged.mode,
     tierAssignments: packaged.tierAssignments,
     expandIds: packaged.expandIds,
     estimatedContextTokens: packaged.estimatedContextTokens,
@@ -316,6 +316,8 @@ export async function performFastSearch(
 ): Promise<RetrievalResult> {
   const label = classifyQueryDetailed(query).label;
   const escalate = label === 'multi-hop' || label === 'aggregation' || label === 'complex';
+  // Fast search owns these latency toggles based on query class; caller options
+  // still flow through for packaging, threshold, and strategy controls.
   return performSearch(deps, userId, query, sourceSite, limit, undefined, undefined, namespaceScope, {
     ...retrievalOptions,
     skipRepairLoop: !escalate,
@@ -346,17 +348,41 @@ export async function performWorkspaceSearch(
     workspace.workspaceId, queryEmbedding, effectiveLimit,
     options.agentScope ?? 'all', workspace.agentId, options.referenceTime,
   );
-  const { filtered: staleFilteredMemories } = await excludeStaleComposites(deps.stores.memory, userId, memories);
-  const gate = resolveRelevanceGate(query, options.retrievalOptions?.relevanceThreshold, deps.config);
-  const { memories: filteredMemories } = applyRelevanceFilter(staleFilteredMemories, gate);
+  const trace = new TraceCollector(query, userId);
+  trace.stage('workspace-search', memories, {
+    workspaceId: workspace.workspaceId,
+    agentId: workspace.agentId,
+    agentScope: options.agentScope ?? 'all',
+  });
+
+  const { filtered: staleFilteredMemories, removedCompositeIds } =
+    await excludeStaleComposites(deps.stores.memory, userId, memories);
+  if (removedCompositeIds.length > 0) {
+    trace.stage('stale-composite-filter', staleFilteredMemories, {
+      removedCount: removedCompositeIds.length,
+      removedIds: removedCompositeIds,
+    });
+  }
+
+  const relevanceFilter = applySearchRelevanceFilter(
+    staleFilteredMemories,
+    trace,
+    query,
+    options.retrievalOptions,
+    deps.config,
+  );
+  const filteredMemories = relevanceFilter.memories;
   for (const m of filteredMemories) deps.stores.memory.touchMemory(m.id).catch(() => {});
 
   const mode = options.retrievalOptions?.retrievalMode ?? 'flat';
   const injection = buildInjection(filteredMemories, query, mode, options.retrievalOptions?.tokenBudget);
+  updateRetrievalSummary(trace, filteredMemories, query, options.retrievalOptions, relevanceFilter);
+  trace.finalize(filteredMemories);
   return {
     memories: filteredMemories,
     citations: filteredMemories.map((m) => m.id),
     retrievalMode: mode,
+    retrievalSummary: trace.getRetrievalSummary(),
     ...injection,
   };
 }

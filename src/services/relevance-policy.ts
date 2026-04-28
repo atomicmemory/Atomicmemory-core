@@ -35,16 +35,27 @@ export interface RelevanceFilterResult {
   removedIds: string[];
 }
 
+type ScoredSearchResult = SearchResult & {
+  semantic_similarity: number;
+  ranking_score: number;
+  relevance: number;
+};
+
 const BROAD_QUERY_LABELS = new Set<QueryComplexityLabel>(['aggregation', 'multi-hop']);
-const INTEGRATION_SOURCE_MARKERS = [
+const INTEGRATION_SOURCE_PREFIXES = ['integration-', 'integration_', 'integration:', 'integration/'];
+const KNOWN_INTEGRATION_SOURCE_SITES = new Set([
   'integration',
   'gmail',
+  'gmail.com',
   'google-drive',
   'google_drive',
-  'drive',
+  'drive.google.com',
+  'docs.google.com',
+  'mail.google.com',
   'x.com',
   'twitter',
-];
+  'twitter.com',
+]);
 
 export function resolveRelevanceGate(
   query: string,
@@ -79,7 +90,7 @@ export function applyRelevanceFilter(
   };
 }
 
-function withScoreSemantics(memory: SearchResult): SearchResult {
+function withScoreSemantics(memory: SearchResult): ScoredSearchResult {
   const semanticSimilarity = finiteOrZero(memory.semantic_similarity ?? memory.similarity);
   const rankingScore = finiteOrZero(memory.ranking_score ?? memory.score);
   const relevance = clampUnit(memory.relevance ?? semanticSimilarity);
@@ -102,18 +113,18 @@ function buildGate(
   return { threshold, source, reason, queryLabel };
 }
 
-function buildDecision(memory: SearchResult, gate: RelevanceGate): RelevanceFilterDecision {
-  const sourceKind = isIntegrationSource(memory.source_site) ? 'integration' : 'local';
+function buildDecision(memory: ScoredSearchResult, gate: RelevanceGate): RelevanceFilterDecision {
+  const sourceKind = classifySourceKind(memory.source_site);
   const threshold = gate.threshold;
-  const kept = threshold === null || (memory.relevance ?? 0) >= threshold;
+  const kept = threshold === null || memory.relevance >= threshold;
   return {
     id: memory.id,
     sourceSite: memory.source_site,
     sourceKind,
     namespace: memory.namespace ?? null,
-    semanticSimilarity: memory.semantic_similarity ?? 0,
-    rankingScore: memory.ranking_score ?? memory.score,
-    relevance: memory.relevance ?? 0,
+    semanticSimilarity: memory.semantic_similarity,
+    rankingScore: memory.ranking_score,
+    relevance: memory.relevance,
     threshold,
     decision: kept ? 'kept' : 'filtered',
     reason: buildReason(kept, gate, sourceKind),
@@ -132,9 +143,23 @@ function buildReason(
   return kept ? 'meets-threshold' : 'below-threshold';
 }
 
-function isIntegrationSource(sourceSite: string): boolean {
-  const normalized = sourceSite.toLowerCase();
-  return INTEGRATION_SOURCE_MARKERS.some((marker) => normalized.includes(marker));
+function classifySourceKind(sourceSite: string): RelevanceFilterDecision['sourceKind'] {
+  const normalized = normalizeSourceSite(sourceSite);
+  if (INTEGRATION_SOURCE_PREFIXES.some((prefix) => normalized.startsWith(prefix))) {
+    return 'integration';
+  }
+  return KNOWN_INTEGRATION_SOURCE_SITES.has(normalized) ? 'integration' : 'local';
+}
+
+function normalizeSourceSite(sourceSite: string): string {
+  const trimmed = sourceSite.trim().toLowerCase();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch {
+    return trimmed;
+  }
 }
 
 function finiteOrZero(value: number): number {

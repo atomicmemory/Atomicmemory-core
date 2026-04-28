@@ -20,11 +20,6 @@ const {
   mockEmitAuditEvent: vi.fn(),
   mockRunSearchPipelineWithTrace: vi.fn(),
 }));
-vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
-  process.env.EMBEDDING_DIMENSIONS ??= '1536';
-});
 
 vi.mock('../lesson-service.js', () => ({
   checkLessons: mockCheckLessons,

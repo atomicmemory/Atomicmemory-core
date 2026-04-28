@@ -7,8 +7,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockChat, embeddingOverrides } = vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_eval';
   return {
     mockChat: vi.fn(),
     embeddingOverrides: new Map<string, number[]>(),
@@ -205,4 +203,3 @@ function hashVector(text: string): number[] {
   const seed = [...text].reduce((sum, char, index) => sum + char.charCodeAt(0) * (index + 1), 0) || 1;
   return unitVector(seed);
 }
-

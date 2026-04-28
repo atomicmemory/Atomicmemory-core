@@ -5,12 +5,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
-  process.env.EMBEDDING_DIMENSIONS ??= '1536';
-});
-
 import { TraceCollector } from '../retrieval-trace.js';
 import { config } from '../../config.js';
 import { createSearchResult } from './test-fixtures.js';
