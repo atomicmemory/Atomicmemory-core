@@ -120,6 +120,7 @@ async function postProcessResults(
   userId: string,
   query: string,
   asOf: string | undefined,
+  sourceSite: string | undefined,
   retrievalOptions: RetrievalOptions | undefined,
 ): Promise<PostProcessedSearch> {
   let memories = rawMemories.filter((m) => !m.workspace_id);
@@ -160,6 +161,7 @@ async function postProcessResults(
     query,
     retrievalOptions,
     deps.config,
+    { asOf, sourceSite },
   );
   return { memories: relevanceFilter.memories, consensusResult, relevanceFilter };
 }
@@ -170,8 +172,9 @@ function applySearchRelevanceFilter(
   query: string,
   retrievalOptions: RetrievalOptions | undefined,
   runtimeConfig: MemoryServiceDeps['config'],
+  gateContext: { asOf?: string; sourceSite?: string } = {},
 ): RelevanceFilterSummary & { memories: SearchResult[] } {
-  const gate = resolveRelevanceGate(query, retrievalOptions?.relevanceThreshold, runtimeConfig);
+  const gate = resolveRelevanceGate(query, retrievalOptions?.relevanceThreshold, runtimeConfig, gateContext);
   const result = applyRelevanceFilter(memories, gate);
   const summary = {
     threshold: gate.threshold,
@@ -296,7 +299,9 @@ export async function performSearch(
   if (uriResult) return uriResult;
 
   const { memories: rawMemories, activeTrace } = await executeSearchStep(deps, userId, query, effectiveLimit, sourceSite, referenceTime, namespaceScope, retrievalOptions, asOf, trace);
-  const filteredMemories = await postProcessResults(deps, rawMemories, activeTrace, userId, query, asOf, retrievalOptions);
+  const filteredMemories = await postProcessResults(
+    deps, rawMemories, activeTrace, userId, query, asOf, sourceSite, retrievalOptions,
+  );
   return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
 }
 

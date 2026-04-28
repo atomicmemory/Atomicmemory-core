@@ -70,7 +70,10 @@ describe('current-state composite packaging', () => {
     expect(result.injectionText).not.toContain('considered MongoDB earlier');
     expect(trace.stage).toHaveBeenCalledWith(
       'flat-packaging-dedup',
-      [current, old],
+      [
+        expect.objectContaining({ id: current.id, content: current.content }),
+        expect.objectContaining({ id: old.id, content: old.content }),
+      ],
       expect.objectContaining({ removedIds: ['composite-timeline'] }),
     );
   });

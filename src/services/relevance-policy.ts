@@ -3,10 +3,16 @@
  */
 
 import type { SearchResult } from '../db/repository-types.js';
+import { isCurrentStateQuery, isHistoricalQuery } from './current-state-ranking.js';
 import { classifyQueryDetailed, type QueryComplexityLabel } from './retrieval-policy.js';
 
 export interface RelevanceGateConfig {
   similarityThreshold: number;
+}
+
+export interface RelevanceGateContext {
+  asOf?: string;
+  sourceSite?: string;
 }
 
 export interface RelevanceGate {
@@ -61,10 +67,20 @@ export function resolveRelevanceGate(
   query: string,
   requestedThreshold: number | undefined,
   runtimeConfig: RelevanceGateConfig,
+  context: RelevanceGateContext = {},
 ): RelevanceGate {
   const queryLabel = classifyQueryDetailed(query).label;
   if (requestedThreshold !== undefined) {
     return buildGate(requestedThreshold, 'request', 'caller-threshold', queryLabel);
+  }
+  if (context.asOf) {
+    return { threshold: null, source: 'disabled', reason: 'as-of-query', queryLabel };
+  }
+  if (context.sourceSite) {
+    return { threshold: null, source: 'disabled', reason: 'source-site-filter', queryLabel };
+  }
+  if (isCurrentStateQuery(query) || isHistoricalQuery(query)) {
+    return { threshold: null, source: 'disabled', reason: 'temporal-state-query', queryLabel };
   }
   if (RECALL_ORIENTED_QUERY_LABELS.has(queryLabel)) {
     return { threshold: null, source: 'disabled', reason: `recall-oriented-${queryLabel}-query`, queryLabel };

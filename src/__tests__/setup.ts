@@ -13,3 +13,4 @@ if (envPath) {
 process.env.OPENAI_API_KEY ??= 'test-openai-key';
 process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
 process.env.EMBEDDING_DIMENSIONS ??= '1536';
+process.env.CORE_RUNTIME_CONFIG_MUTATION_ENABLED ??= 'true';
