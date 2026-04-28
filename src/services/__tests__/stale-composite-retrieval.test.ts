@@ -14,10 +14,6 @@ const mockGetMemory = vi.hoisted(() => vi.fn());
 const mockTraceStage = vi.hoisted(() => vi.fn());
 const mockTraceEvent = vi.hoisted(() => vi.fn());
 const mockTraceFinalize = vi.hoisted(() => vi.fn());
-vi.hoisted(() => {
-  process.env.OPENAI_API_KEY ??= 'test-openai-key';
-  process.env.DATABASE_URL ??= 'postgresql://atomicmem:atomicmem@localhost:5433/atomicmem_test';
-});
 
 import { createSearchResult, setupSearchPipelineTest, createSearchPipelineMockFactory } from './test-fixtures.js';
 vi.mock('../search-pipeline.js', () => createSearchPipelineMockFactory(mockRunSearchPipelineWithTrace));

@@ -19,10 +19,11 @@
 
 import express from 'express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryRouter } from '../routes/memories.js';
-import type { MemoryService } from '../services/memory-service.js';
+
 import { type BootedApp, bindEphemeral } from '../app/bind-ephemeral.js';
 import { config, type RuntimeConfig } from '../config.js';
+import { createMemoryRouter } from '../routes/memories.js';
+import type { MemoryService } from '../services/memory-service.js';
 
 const ROUTE_CONFIG = {
   retrievalProfile: 'override-test-profile',
@@ -76,18 +77,7 @@ describe('POST /memories/* — per-request config_override', () => {
       memoryIds: [], linksCreated: 0, compositesCreated: 0,
     });
 
-    const service = {
-      scopedSearch, ingest, quickIngest,
-      storeVerbatim: vi.fn(), workspaceIngest: vi.fn(),
-      scopedExpand: vi.fn(), scopedList: vi.fn(), scopedGet: vi.fn(), scopedDelete: vi.fn(),
-      list: vi.fn(), get: vi.fn(), delete: vi.fn(), expand: vi.fn(), resetBySource: vi.fn(),
-      getStats: vi.fn(), consolidate: vi.fn(), executeConsolidation: vi.fn(),
-      reconcileDeferred: vi.fn(), reconcileDeferredAll: vi.fn(), getDeferredStatus: vi.fn(),
-      evaluateDecay: vi.fn(), archiveDecayed: vi.fn(), checkCap: vi.fn(),
-      getAuditTrail: vi.fn(), getMutationSummary: vi.fn(), getRecentMutations: vi.fn(),
-      getLessons: vi.fn(), getLessonStats: vi.fn(), reportLesson: vi.fn(), deactivateLesson: vi.fn(),
-    } as unknown as MemoryService;
-
+    const service = createRouteService(scopedSearch, ingest, quickIngest);
     const adapter = {
       base: routeBaseConfig,
       current: () => ({ ...ROUTE_CONFIG }),
@@ -149,6 +139,29 @@ describe('POST /memories/* — per-request config_override', () => {
     expect(options.effectiveConfig.hybridSearchEnabled).toBe(true);
   });
 
+  it('POST /search with threshold → forwards relevanceThreshold', async () => {
+    const res = await postJson(`/memories/search`, {
+      user_id: 'u',
+      query: 'q',
+      threshold: 0.42,
+    });
+    expect(res.status).toBe(200);
+    const call = scopedSearch.mock.calls[0]!;
+    const options = call[2] as { retrievalOptions: { relevanceThreshold: number } };
+    expect(options.retrievalOptions.relevanceThreshold).toBe(0.42);
+  });
+
+  it('POST /search rejects invalid threshold', async () => {
+    const res = await postJson(`/memories/search`, {
+      user_id: 'u',
+      query: 'q',
+      threshold: 1.2,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/threshold must be between 0 and 1/);
+    expect(scopedSearch).not.toHaveBeenCalled();
+  });
+
   it('POST /search/fast with override → headers and fast:true both set', async () => {
     const res = await postJson(`/memories/search/fast`, {
         user_id: 'u', query: 'q',
@@ -160,6 +173,22 @@ describe('POST /memories/* — per-request config_override', () => {
     const options = call[2] as { fast: boolean; effectiveConfig: { crossEncoderEnabled: boolean } };
     expect(options.fast).toBe(true);
     expect(options.effectiveConfig.crossEncoderEnabled).toBe(true);
+  });
+
+  it('POST /search/fast with threshold → forwards relevanceThreshold', async () => {
+    const res = await postJson(`/memories/search/fast`, {
+      user_id: 'u',
+      query: 'q',
+      threshold: 0.7,
+    });
+    expect(res.status).toBe(200);
+    const call = scopedSearch.mock.calls[0]!;
+    const options = call[2] as {
+      fast: boolean;
+      retrievalOptions: { relevanceThreshold: number };
+    };
+    expect(options.fast).toBe(true);
+    expect(options.retrievalOptions.relevanceThreshold).toBe(0.7);
   });
 
   it('POST /ingest with override → headers + trailing effectiveConfig arg', async () => {
@@ -197,10 +226,7 @@ describe('POST /memories/* — per-request config_override', () => {
 
   it('unknown override key → 200, service invoked, warning header set', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const res = await postJson(`/memories/search`, {
-        user_id: 'u', query: 'q',
-        config_override: { bogusFlag: true, alsoBogus: 'nope' },
-      });
+    const res = await postSearchWithConfigOverride(booted, { bogusFlag: true, alsoBogus: 'nope' });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBe('alsoBogus,bogusFlag');
@@ -211,10 +237,7 @@ describe('POST /memories/* — per-request config_override', () => {
 
   it('mix of known and unknown keys → only unknown ones in warning header', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const res = await postJson(`/memories/search`, {
-        user_id: 'u', query: 'q',
-        config_override: { hybridSearchEnabled: true, futureFieldX: 42 },
-      });
+    const res = await postSearchWithConfigOverride(booted, { hybridSearchEnabled: true, futureFieldX: 42 });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Keys')).toBe('futureFieldX,hybridSearchEnabled');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBe('futureFieldX');
@@ -222,10 +245,7 @@ describe('POST /memories/* — per-request config_override', () => {
   });
 
   it('all-known keys → no X-Atomicmem-Unknown-Override-Keys header', async () => {
-    const res = await postJson(`/memories/search`, {
-        user_id: 'u', query: 'q',
-        config_override: { hybridSearchEnabled: true },
-      });
+    const res = await postSearchWithConfigOverride(booted, { hybridSearchEnabled: true });
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Atomicmem-Config-Override-Applied')).toBe('true');
     expect(res.headers.get('X-Atomicmem-Unknown-Override-Keys')).toBeNull();
@@ -253,3 +273,28 @@ describe('POST /memories/* — per-request config_override', () => {
     expect(options.effectiveConfig).toBeUndefined();
   });
 });
+
+function createRouteService(
+  scopedSearch: ReturnType<typeof vi.fn>,
+  ingest: ReturnType<typeof vi.fn>,
+  quickIngest: ReturnType<typeof vi.fn>,
+): MemoryService {
+  return {
+    scopedSearch,
+    ingest,
+    quickIngest,
+    storeVerbatim: vi.fn(),
+    workspaceIngest: vi.fn(),
+  } as unknown as MemoryService;
+}
+
+function postSearchWithConfigOverride(
+  booted: BootedApp,
+  configOverride: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(`${booted.baseUrl}/memories/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: 'u', query: 'q', config_override: configOverride }),
+  });
+}

@@ -4,6 +4,7 @@
 
 import type { CoreRuntimeConfig } from '../app/runtime-container.js';
 import type { SearchResult } from '../db/memory-repository.js';
+import { isCurrentStateQuery, isHistoricalQuery } from './current-state-ranking.js';
 import { isTemporalOrderingQuery } from './temporal-query-expansion.js';
 
 const SIMPLE_QUERY_LIMIT = 5;
@@ -23,8 +24,47 @@ type AdaptiveLimitConfig = Pick<
   | 'adaptiveAggregationLimit'
 >;
 
+type RankingEligibilityConfig = Pick<CoreRuntimeConfig, 'retrievalProfileSettings'>;
+
+export interface RankingEligibilityContext {
+  sourceSite?: string;
+  referenceTime?: Date;
+}
+
+export interface RecallBypassContext {
+  asOf?: string;
+  referenceTime?: Date;
+  sourceSite?: string;
+}
+
+export interface RankingEligibilityDecision {
+  id: string;
+  similarity: number;
+  threshold: number;
+  decision: 'eligible' | 'filtered';
+  reason: string;
+}
+
+export interface RankingEligibilityResult {
+  results: SearchResult[];
+  decisions: RankingEligibilityDecision[];
+  removedIds: string[];
+  threshold: number | null;
+  reason: string;
+  queryLabel: QueryComplexityLabel;
+  triggered: boolean;
+}
+
 /** Hard ceiling for aggregation queries (prevents runaway candidate pools). */
 const AGGREGATION_HARD_CAP = 50;
+const RECALL_ORIENTED_QUERY_LABELS = new Set<QueryComplexityLabel>(['complex', 'multi-hop', 'aggregation']);
+
+const RECALL_BYPASS_REASONS = {
+  AS_OF_QUERY: 'as-of-query',
+  SOURCE_SITE_FILTER: 'source-site-filter',
+  TEMPORAL_STATE_QUERY: 'temporal-state-query',
+  recallOriented: (queryLabel: QueryComplexityLabel) => `recall-oriented-${queryLabel}-query`,
+} as const;
 
 /**
  * Markers indicating temporal/relational complexity (multi-hop or comparison).
@@ -188,6 +228,57 @@ export function resolveRerankDepth(
   return Math.max(clampLimitWide(limit), runtimeConfig.retrievalProfileSettings.rerankDepth);
 }
 
+export function applyRankingEligibility(
+  query: string,
+  candidates: SearchResult[],
+  runtimeConfig: RankingEligibilityConfig,
+  context: RankingEligibilityContext = {},
+): RankingEligibilityResult {
+  const queryLabel = classifyQueryDetailed(query).label;
+  const bypassReason = resolveRecallBypass(query, queryLabel, context);
+  if (bypassReason) {
+    return {
+      results: candidates,
+      decisions: [],
+      removedIds: [],
+      threshold: null,
+      reason: bypassReason,
+      queryLabel,
+      triggered: false,
+    };
+  }
+
+  const threshold = clampUnit(runtimeConfig.retrievalProfileSettings.rankingMinSimilarity);
+  if (threshold <= 0) {
+    return {
+      results: candidates,
+      decisions: [],
+      removedIds: [],
+      threshold: null,
+      reason: 'non-positive-ranking-threshold',
+      queryLabel,
+      triggered: false,
+    };
+  }
+
+  const decisions = candidates.map((candidate) => buildRankingEligibilityDecision(candidate, threshold));
+  const removedIds = decisions
+    .filter((decision) => decision.decision === 'filtered')
+    .map((decision) => decision.id);
+  const keptIds = new Set(
+    decisions.filter((decision) => decision.decision === 'eligible').map((decision) => decision.id),
+  );
+  return {
+    results: candidates.filter((candidate) => keptIds.has(candidate.id)),
+    decisions,
+    removedIds,
+    threshold,
+    reason: 'direct-query-ranking-floor',
+    queryLabel,
+    triggered: true,
+  };
+}
+
 export type QueryComplexityLabel = 'simple' | 'medium' | 'complex' | 'multi-hop' | 'aggregation';
 
 export interface QueryClassification {
@@ -230,6 +321,18 @@ export function classifyQueryDetailed(query: string): QueryClassification {
   return { limit: MEDIUM_QUERY_LIMIT, label: 'medium' };
 }
 
+export function resolveRecallBypass(
+  query: string,
+  queryLabel: QueryComplexityLabel,
+  context: RecallBypassContext,
+): string | null {
+  if (context.asOf || context.referenceTime) return RECALL_BYPASS_REASONS.AS_OF_QUERY;
+  if (context.sourceSite) return RECALL_BYPASS_REASONS.SOURCE_SITE_FILTER;
+  if (isCurrentStateQuery(query) || isHistoricalQuery(query)) return RECALL_BYPASS_REASONS.TEMPORAL_STATE_QUERY;
+  if (RECALL_ORIENTED_QUERY_LABELS.has(queryLabel)) return RECALL_BYPASS_REASONS.recallOriented(queryLabel);
+  return null;
+}
+
 function isMultiHopQuery(lowerQuery: string): boolean {
   return MULTI_HOP_MARKERS.some((marker) => new RegExp(marker).test(lowerQuery));
 }
@@ -249,6 +352,30 @@ function clampLimit(limit: number, maxSearchResults: number): number {
 /** Wider clamp for pipeline internals — respects aggregation ceiling, not profile cap. */
 function clampLimitWide(limit: number): number {
   return Math.max(1, Math.min(AGGREGATION_HARD_CAP, Math.floor(limit)));
+}
+
+function buildRankingEligibilityDecision(
+  candidate: SearchResult,
+  threshold: number,
+): RankingEligibilityDecision {
+  const similarity = finiteOrZero(candidate.similarity);
+  const eligible = similarity >= threshold;
+  return {
+    id: candidate.id,
+    similarity,
+    threshold,
+    decision: eligible ? 'eligible' : 'filtered',
+    reason: eligible ? 'meets-ranking-floor' : 'below-ranking-floor',
+  };
+}
+
+function finiteOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+function clampUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 function mergeWeightedResults(

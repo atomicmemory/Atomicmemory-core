@@ -112,7 +112,15 @@ export class MemoryService {
       });
     }
     if (options.fast) {
-      return performFastSearch(deps, scope.userId, query, options.sourceSite, options.limit, options.namespaceScope);
+      return performFastSearch(
+        deps,
+        scope.userId,
+        query,
+        options.sourceSite,
+        options.limit,
+        options.namespaceScope,
+        options.retrievalOptions,
+      );
     }
     return performSearch(deps, scope.userId, query, options.sourceSite, options.limit, options.asOf, options.referenceTime, options.namespaceScope, options.retrievalOptions);
   }

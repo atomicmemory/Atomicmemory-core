@@ -28,6 +28,7 @@ const mockConfig = {
   retrievalProfileSettings: {
     repairPrimaryWeight: 1,
     repairRewriteWeight: 1,
+    rankingMinSimilarity: 0.3,
   },
 };
 
@@ -45,6 +46,15 @@ vi.mock('../retrieval-policy.js', () => ({
   resolveRerankDepth: vi.fn((limit: number) => limit),
   shouldRunRepairLoop: vi.fn(() => false),
   shouldAcceptRepair: vi.fn(),
+  applyRankingEligibility: vi.fn((_query: string, candidates: unknown[]) => ({
+    results: candidates,
+    decisions: [],
+    removedIds: [],
+    threshold: null,
+    reason: 'mocked',
+    queryLabel: 'simple',
+    triggered: false,
+  })),
 }));
 vi.mock('../query-expansion.js', () => ({
   expandQueryViaEntities: vi.fn(),

@@ -13,6 +13,7 @@ import type { SearchStore, SemanticLinkStore, MemoryStore, EntityStore } from '.
 import { embedText } from './embedding.js';
 import { rewriteQuery } from './extraction.js';
 import {
+  applyRankingEligibility,
   resolveRerankDepth,
   shouldRunRepairLoop,
   shouldAcceptRepair,
@@ -260,6 +261,7 @@ export async function runSearchPipelineWithTrace(
     results,
     queryEmbedding,
     limit,
+    sourceSite,
     referenceTime,
     temporalExpansion.temporalAnchorFingerprints,
     trace,
@@ -277,11 +279,30 @@ export async function runSearchPipelineWithTrace(
   if (namespaceScope) {
     trace.event('namespace-filtering', { scope: namespaceScope });
   }
-  const filtered = namespaceScope
-    ? selected.filter((r) => isInScope(r.namespace, namespaceScope))
-    : selected;
+  const filtered = applyNamespaceScopeFilter(selected, namespaceScope, trace);
 
   return { filtered, trace };
+}
+
+function applyNamespaceScopeFilter(
+  selected: SearchResult[],
+  namespaceScope: string | null,
+  trace: TraceCollector,
+): SearchResult[] {
+  if (!namespaceScope) return selected;
+  const decisions = selected.map((result) => ({
+    id: result.id,
+    namespace: result.namespace ?? null,
+    sourceSite: result.source_site,
+    decision: isInScope(result.namespace, namespaceScope) ? 'kept' : 'filtered',
+  }));
+  const filtered = selected.filter((result) => isInScope(result.namespace, namespaceScope));
+  trace.stage('namespace-filter', filtered, {
+    scope: namespaceScope,
+    removedIds: decisions.filter((decision) => decision.decision === 'filtered').map((decision) => decision.id),
+    decisions,
+  });
+  return filtered;
 }
 
 async function runInitialRetrieval(
@@ -682,6 +703,7 @@ async function applyExpansionAndReranking(
   results: SearchResult[],
   queryEmbedding: number[],
   limit: number,
+  sourceSite: string | undefined,
   referenceTime: Date | undefined,
   temporalAnchorFingerprints: string[],
   trace: TraceCollector,
@@ -696,15 +718,23 @@ async function applyExpansionAndReranking(
     trace,
     policyConfig,
   );
+  const eligible = applyRankingEligibilityStage(
+    query,
+    ranked,
+    sourceSite,
+    referenceTime,
+    trace,
+    policyConfig,
+  );
 
   return selectAndExpandCandidates(
     stores,
     userId,
-    ranked.candidates,
+    eligible.candidates,
     queryEmbedding,
     limit,
     referenceTime,
-    ranked.protectedFingerprints,
+    eligible.protectedFingerprints,
     trace,
     policyConfig,
   );
@@ -822,6 +852,29 @@ function applyTemporalConstraintStage(
     candidates: constrained.results,
     protectedFingerprints: [...state.protectedFingerprints, ...constrained.protectedFingerprints],
   };
+}
+
+function applyRankingEligibilityStage(
+  query: string,
+  state: RankedCandidateState,
+  sourceSite: string | undefined,
+  referenceTime: Date | undefined,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  const eligibility = applyRankingEligibility(query, state.candidates, policyConfig, {
+    sourceSite,
+    referenceTime,
+  });
+  if (!eligibility.triggered) return state;
+  trace.stage('ranking-eligibility', eligibility.results, {
+    threshold: eligibility.threshold,
+    reason: eligibility.reason,
+    queryLabel: eligibility.queryLabel,
+    removedIds: eligibility.removedIds,
+    decisions: eligibility.decisions,
+  });
+  return { ...state, candidates: eligibility.results };
 }
 
 async function selectAndExpandCandidates(
