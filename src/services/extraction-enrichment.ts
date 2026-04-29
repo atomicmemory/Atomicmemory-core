@@ -7,7 +7,9 @@
 
 import type { ExtractedEntity, ExtractedFact, ExtractedRelation } from './extraction.js';
 import { dedupeEntities } from './entity-dedup.js';
-import { inferEventAnchorFacts } from './event-anchor-facts.js';
+import { inferEventAnchorFacts, type EventAnchorOptions } from './event-anchor-facts.js';
+
+export type EnrichmentOptions = EventAnchorOptions;
 
 const SELF_ENTITY: ExtractedEntity = { name: 'User', type: 'person' };
 const SELF_MARKERS = ['user ', 'user\'s', 'i ', 'i\'m', 'i’ve', 'i have', 'my '];
@@ -75,10 +77,13 @@ const CANONICAL_ENTITY_NAMES: Record<string, string> = {
   msr: 'Microsoft Research',
 };
 
-export function enrichExtractedFacts(facts: ExtractedFact[]): ExtractedFact[] {
+export function enrichExtractedFacts(
+  facts: ExtractedFact[],
+  options: EnrichmentOptions = {},
+): ExtractedFact[] {
   const enriched = facts.flatMap((fact) => {
     const baseFact = enrichExtractedFact(fact);
-    return [baseFact, ...inferEventAnchorFacts(baseFact)];
+    return [baseFact, ...inferEventAnchorFacts(baseFact, options)];
   });
   return dedupeFacts(enriched);
 }

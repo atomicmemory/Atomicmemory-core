@@ -14,6 +14,13 @@ import { extractSessionTimestamp, parseSessionDate } from './session-date.js';
 
 export interface ExtractionOptions {
   observationDateExtractionEnabled?: boolean;
+  /**
+   * EXP-06: when no DESCRIPTOR_RULE matches but the fact has an `As of <date>,`
+   * prefix and a recoverable subject, emit a generic `event.occurred` anchor.
+   * Threaded through to `enrichExtractedFacts` and `inferEventAnchorFacts`.
+   * Defaults to off.
+   */
+  genericEventAnchorEnabled?: boolean;
 }
 
 export function buildExtractionUserMessage(

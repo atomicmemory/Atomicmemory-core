@@ -328,7 +328,9 @@ export async function extractFacts(
   return timedSync('ingest.extract.post-process', () => {
     const normalized: ExtractedFact[] = rawFacts.map((m) => normalizeRawFact(m));
     const anchoredFacts = applyObservationDateAnchors(normalized, conversationText, options);
-    const baseFacts = enrichExtractedFacts(normalizeExtractedFacts(anchoredFacts));
+    const baseFacts = enrichExtractedFacts(normalizeExtractedFacts(anchoredFacts), {
+      genericEventAnchorEnabled: options.genericEventAnchorEnabled,
+    });
     return mergeSupplementalFacts(baseFacts, conversationText);
   });
 }

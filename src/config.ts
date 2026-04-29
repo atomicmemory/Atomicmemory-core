@@ -83,6 +83,7 @@ export interface RuntimeConfig {
   consensusExtractionRuns: number;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
+  genericEventAnchorEnabled: boolean;
   entropyGateEnabled: boolean;
   entropyGateThreshold: number;
   entropyGateAlpha: number;
@@ -342,6 +343,7 @@ export const config: RuntimeConfig = {
   consensusExtractionRuns: parseInt(optionalEnv('CONSENSUS_EXTRACTION_RUNS') ?? '3', 10),
   observationDateExtractionEnabled: (optionalEnv('OBSERVATION_DATE_EXTRACTION_ENABLED') ?? 'false') === 'true',
   quotedEntityExtractionEnabled: (optionalEnv('QUOTED_ENTITY_EXTRACTION_ENABLED') ?? 'false') === 'true',
+  genericEventAnchorEnabled: (optionalEnv('GENERIC_EVENT_ANCHOR_ENABLED') ?? 'false') === 'true',
   entropyGateEnabled: (optionalEnv('ENTROPY_GATE_ENABLED') ?? 'false') === 'true',
   entropyGateThreshold: parseFloat(optionalEnv('ENTROPY_GATE_THRESHOLD') ?? '0.35'),
   entropyGateAlpha: parseFloat(optionalEnv('ENTROPY_GATE_ALPHA') ?? '0.5'),
@@ -505,6 +507,7 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'chunkSizeTurns', 'chunkOverlapTurns',
   'consensusExtractionEnabled', 'consensusExtractionRuns',
   'observationDateExtractionEnabled', 'quotedEntityExtractionEnabled',
+  'genericEventAnchorEnabled',
   'entropyGateEnabled', 'entropyGateThreshold', 'entropyGateAlpha',
   // Affinity clustering
   'affinityClusteringThreshold', 'affinityClusteringMinSize',
