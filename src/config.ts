@@ -127,6 +127,10 @@ export interface RuntimeConfig {
   literalListProtectionMaxProtected: number;
   temporalQueryConstraintEnabled: boolean;
   temporalQueryConstraintBoost: number;
+  retrievalConfidenceGateEnabled: boolean;
+  retrievalConfidenceMarginNormalizer: number;
+  retrievalConfidenceSimilarityNormalizer: number;
+  retrievalConfidenceFloor: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -374,6 +378,10 @@ export const config: RuntimeConfig = {
   literalListProtectionMaxProtected: parsePositiveIntEnv('LITERAL_LIST_PROTECTION_MAX_PROTECTED', 3),
   temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
+  retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
+  retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.05'),
+  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.5'),
+  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.3'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -514,6 +522,9 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'literalListProtectionEnabled', 'literalListProtectionMaxProtected',
   // Temporal query selection
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
+  // Retrieval confidence gate
+  'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
+  'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred

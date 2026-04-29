@@ -38,6 +38,7 @@ import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
+import { computeRetrievalConfidence, type RetrievalConfidence } from './retrieval-confidence-gate.js';
 
 const TEMPORAL_NEIGHBOR_WINDOW_MINUTES = 30;
 const SEMANTIC_RRF_WEIGHT = 1.2;
@@ -85,6 +86,10 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'retrievalProfileSettings'
   | 'temporalQueryConstraintBoost'
   | 'temporalQueryConstraintEnabled'
+  | 'retrievalConfidenceGateEnabled'
+  | 'retrievalConfidenceMarginNormalizer'
+  | 'retrievalConfidenceSimilarityNormalizer'
+  | 'retrievalConfidenceFloor'
 >;
 /**
  * Decide whether to auto-skip cross-encoder reranking.
@@ -142,7 +147,7 @@ export async function runSearchPipelineWithTrace(
   sourceSite?: string,
   referenceTime?: Date,
   options: SearchPipelineOptions = {},
-): Promise<{ filtered: SearchResult[]; trace: TraceCollector }> {
+): Promise<{ filtered: SearchResult[]; trace: TraceCollector; retrievalConfidence: RetrievalConfidence | null }> {
   const trace = new TraceCollector(query, userId);
   const policyConfig: SearchPipelineRuntimeConfig = options.runtimeConfig ?? config;
   const mmrPoolMultiplier = policyConfig.mmrEnabled ? 3 : 1;
@@ -267,6 +272,15 @@ export async function runSearchPipelineWithTrace(
     policyConfig,
   ));
 
+  const retrievalConfidence = computeRetrievalConfidence(selected, policyConfig);
+  if (retrievalConfidence?.lowConfidence) {
+    trace.event('low-confidence-gate', {
+      confidence: retrievalConfidence.confidence,
+      topSimilarity: retrievalConfidence.topSimilarity,
+      margin: retrievalConfidence.margin,
+    });
+  }
+
   const namespaceScope = options.namespaceScope ?? null;
   trace.setRetrievalSummary({
     candidateIds: selected.map((result) => result.id),
@@ -281,7 +295,7 @@ export async function runSearchPipelineWithTrace(
     ? selected.filter((r) => isInScope(r.namespace, namespaceScope))
     : selected;
 
-  return { filtered, trace };
+  return { filtered, trace, retrievalConfidence };
 }
 
 async function runInitialRetrieval(
