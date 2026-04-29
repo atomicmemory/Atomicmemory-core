@@ -17,7 +17,7 @@
  */
 
 import type { ExtractedFact, ExtractedEntity, ExtractedRelation } from './extraction.js';
-import { enrichExtractedFacts } from './extraction-enrichment.js';
+import { enrichExtractedFacts, type EnrichmentOptions } from './extraction-enrichment.js';
 import { annotateRelativeTemporalText } from './relative-temporal.js';
 import { isFactBearingAssistantTurn, isAssistantFactStatement } from './assistant-turn-filter.js';
 import {
@@ -403,7 +403,10 @@ function extractKeywords(sentence: string): string[] {
  * Processes both user turns (first-person fact detection) and fact-bearing
  * assistant turns (specific content detection).
  */
-export function quickExtractFacts(conversationText: string): ExtractedFact[] {
+export function quickExtractFacts(
+  conversationText: string,
+  options: EnrichmentOptions = {},
+): ExtractedFact[] {
   const turns = extractFactBearingTurns(conversationText);
   const sessionDate = parseSessionDate(conversationText);
   const sessionDateValue = parseSessionDateValue(conversationText);
@@ -414,7 +417,7 @@ export function quickExtractFacts(conversationText: string): ExtractedFact[] {
     extractFactsFromTurn(turn, conversationText, sessionDate, sessionDateValue, seenFacts, facts);
   }
 
-  return enrichExtractedFacts(facts);
+  return enrichExtractedFacts(facts, options);
 }
 
 /** Extract facts from a single turn's sentences and add to the accumulator. */

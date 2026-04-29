@@ -15,7 +15,19 @@ interface EventAnchorDescriptor {
   eventDateIso: string;
 }
 
+/** Options controlling event-anchor extraction behavior. */
+export interface EventAnchorOptions {
+  /**
+   * EXP-06: when no DESCRIPTOR_RULE matches but the fact has an `As of <date>,`
+   * prefix and a recoverable subject, emit a generic `event.occurred` anchor.
+   * Defaults to off.
+   */
+  genericEventAnchorEnabled?: boolean;
+}
+
+const GENERIC_ANCHOR_LABEL = 'event.occurred';
 const RECORDED_DATE_PATTERN = /^As of ([A-Za-z]+ \d{1,2} \d{4}),\s*/i;
+const RECORDED_DATE_FLEXIBLE_PATTERN = /^As of ([A-Za-z]+(?:\s+\d{1,2})?\s+\d{4}),\s*(.*)$/i;
 const EXPLICIT_EVENT_ANCHOR_PATTERN = /\bevent anchor\s+[a-z.]+/i;
 const EVENT_DATE_PATTERN = /\boccurred on ([A-Za-z]+ \d{1,2} \d{4})\b/i;
 const NON_SUBJECT_TOKENS = new Set(['Hey', 'Long', 'Yesterday', 'Thats', 'Awesome', 'Oh', 'Paris', 'Rome', 'Barcelona']);
@@ -34,7 +46,10 @@ const MONTH_INDEX: Record<string, number> = {
   december: 11,
 };
 
-export function inferEventAnchorFacts(fact: ExtractedFact): ExtractedFact[] {
+export function inferEventAnchorFacts(
+  fact: ExtractedFact,
+  options: EventAnchorOptions = {},
+): ExtractedFact[] {
   if (EXPLICIT_EVENT_ANCHOR_PATTERN.test(fact.fact)) {
     return [];
   }
@@ -42,10 +57,14 @@ export function inferEventAnchorFacts(fact: ExtractedFact): ExtractedFact[] {
   if (!recordedDate) {
     return [];
   }
-  return inferDescriptors(fact, recordedDate).map((descriptor) => buildAnchorFact(fact, descriptor));
+  return inferDescriptors(fact, recordedDate, options).map((descriptor) => buildAnchorFact(fact, descriptor));
 }
 
-function inferDescriptors(fact: ExtractedFact, recordedDate: Date): EventAnchorDescriptor[] {
+function inferDescriptors(
+  fact: ExtractedFact,
+  recordedDate: Date,
+  options: EventAnchorOptions,
+): EventAnchorDescriptor[] {
   const lower = fact.fact.toLowerCase();
   const subject = inferSubject(fact);
   if (!subject) {
@@ -59,6 +78,10 @@ function inferDescriptors(fact: ExtractedFact, recordedDate: Date): EventAnchorD
     for (const label of labels) {
       descriptors.push({ label, subject, eventDateIso });
     }
+  }
+
+  if (descriptors.length === 0 && options.genericEventAnchorEnabled) {
+    descriptors.push({ label: GENERIC_ANCHOR_LABEL, subject, eventDateIso });
   }
 
   return dedupeDescriptors(descriptors);
@@ -112,7 +135,7 @@ function inferRomeLabels(lower: string): string[] {
 }
 
 function buildAnchorFact(sourceFact: ExtractedFact, descriptor: EventAnchorDescriptor): ExtractedFact {
-  const recordedPrefix = sourceFact.fact.match(RECORDED_DATE_PATTERN)?.[1];
+  const recordedPrefix = extractRecordedPrefix(sourceFact.fact);
   const eventDateHuman = formatHumanDate(descriptor.eventDateIso);
   const anchorFact = `As of ${recordedPrefix}, event anchor ${descriptor.label} for ${descriptor.subject} occurred on ${eventDateHuman}.`;
   return {
@@ -193,24 +216,49 @@ function dedupeDescriptors(descriptors: EventAnchorDescriptor[]): EventAnchorDes
   return [...unique.values()];
 }
 
+function extractRecordedPrefix(text: string): string {
+  const strict = text.match(RECORDED_DATE_PATTERN);
+  if (strict) {
+    return strict[1];
+  }
+  const flexible = text.match(RECORDED_DATE_FLEXIBLE_PATTERN);
+  if (flexible) {
+    return flexible[1];
+  }
+  return '';
+}
+
 function parseRecordedDate(text: string): Date | null {
-  const match = text.match(RECORDED_DATE_PATTERN);
-  if (!match) {
+  const strict = text.match(RECORDED_DATE_PATTERN);
+  if (strict) {
+    return parseHumanDate(strict[1]);
+  }
+  const flexible = text.match(RECORDED_DATE_FLEXIBLE_PATTERN);
+  if (!flexible) {
     return null;
   }
-  return parseHumanDate(match[1]);
+  return parseHumanDate(flexible[1]);
 }
 
 function parseHumanDate(input: string): Date | null {
-  const match = input.match(/^([A-Za-z]+) (\d{1,2}) (\d{4})$/);
-  if (!match) {
-    return null;
+  const trimmed = input.trim();
+  const fullMatch = trimmed.match(/^([A-Za-z]+)\s+(\d{1,2})\s+(\d{4})$/);
+  if (fullMatch) {
+    const month = MONTH_INDEX[fullMatch[1].toLowerCase()];
+    if (month === undefined) {
+      return null;
+    }
+    return new Date(Date.UTC(Number(fullMatch[3]), month, Number(fullMatch[2]), 0, 0, 0, 0));
   }
-  const month = MONTH_INDEX[match[1].toLowerCase()];
-  if (month === undefined) {
-    return null;
+  const monthYearMatch = trimmed.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (monthYearMatch) {
+    const month = MONTH_INDEX[monthYearMatch[1].toLowerCase()];
+    if (month === undefined) {
+      return null;
+    }
+    return new Date(Date.UTC(Number(monthYearMatch[2]), month, 1, 0, 0, 0, 0));
   }
-  return new Date(Date.UTC(Number(match[3]), month, Number(match[2]), 0, 0, 0, 0));
+  return null;
 }
 
 function formatHumanDate(isoDate: string): string {

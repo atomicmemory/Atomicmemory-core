@@ -138,7 +138,9 @@ export async function performQuickIngest(
   const ingestStart = performance.now();
   const logicalSessionTimestamp = resolveSessionDate(sessionTimestamp, conversationText);
   const episodeId = await deps.stores.episode.storeEpisode({ userId, content: conversationText, sourceSite, sourceUrl });
-  const facts = timed('quick-ingest.extract', () => Promise.resolve(quickExtractFacts(conversationText)));
+  const facts = timed('quick-ingest.extract', () => Promise.resolve(quickExtractFacts(conversationText, {
+    genericEventAnchorEnabled: deps.config.genericEventAnchorEnabled,
+  })));
   const extractedFacts = await facts;
   const traceCollector = new IngestTraceCollector(deps.config.ingestTraceEnabled);
   const acc = createIngestAccumulator();

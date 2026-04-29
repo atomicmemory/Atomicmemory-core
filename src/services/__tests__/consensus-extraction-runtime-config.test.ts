@@ -53,11 +53,12 @@ describe('consensusExtractFacts runtime config', () => {
       extractionCacheEnabled: false,
       observationDateExtractionEnabled: true,
       quotedEntityExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
 
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       'User: I commute 45 minutes.',
-      { observationDateExtractionEnabled: true },
+      { observationDateExtractionEnabled: true, genericEventAnchorEnabled: false },
       { chunkSizeTurns: 8, chunkOverlapTurns: 2, extractionCacheEnabled: false },
     );
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
@@ -82,14 +83,16 @@ describe('consensusExtractFacts runtime config', () => {
       extractionCacheEnabled: true,
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
 
     expect(mockCachedExtractFacts).toHaveBeenCalledWith(longConversation, {
       observationDateExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       longConversation,
-      { observationDateExtractionEnabled: false },
+      { observationDateExtractionEnabled: false, genericEventAnchorEnabled: false },
       { chunkSizeTurns: 2, chunkOverlapTurns: 1, extractionCacheEnabled: true },
     );
   });
@@ -108,6 +111,7 @@ describe('consensusExtractFacts runtime config', () => {
       extractionCacheEnabled: true,
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
 
     expect(mockChunkedExtractFacts).not.toHaveBeenCalled();
@@ -127,10 +131,12 @@ describe('consensusExtractFacts runtime config', () => {
       extractionCacheEnabled: false,
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
 
     expect(mockExtractFacts).toHaveBeenCalledWith('User: I prefer Rust', {
       observationDateExtractionEnabled: false,
+      genericEventAnchorEnabled: false,
     });
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
   });
