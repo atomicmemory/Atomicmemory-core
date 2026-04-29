@@ -5,6 +5,12 @@
 const IRREGULAR_KEYWORD_NORMALIZATION: Record<string, string> = {
   won: 'win',
   winning: 'win',
+  loves: 'love',
+  loved: 'love',
+  likes: 'like',
+  liked: 'like',
+  enjoying: 'enjoy',
+  enjoys: 'enjoy',
   met: 'meet',
   meeting: 'meet',
   began: 'begin',

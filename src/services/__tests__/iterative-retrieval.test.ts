@@ -79,6 +79,6 @@ describe('applyIterativeRetrieval', () => {
 
     expect(result.triggered).toBe(true);
     expect(result.memories.some((memory) => memory.id === 'neighbor')).toBe(true);
-    expect(result.seedIds).toEqual(['seed-1', 'seed-2']);
+    expect(result.seedIds).toEqual(['seed-2', 'seed-1']);
   });
 });

@@ -24,7 +24,7 @@ import { escapeXml } from '../xml-escape.js';
 import { spansMultipleDates, buildTimelinePack, formatTimelinePack } from './timeline-pack.js';
 import { buildTemporalEvidenceBlock } from './temporal-endpoint-evidence.js';
 import { preserveQueryTermVisibility, sumAssignmentTokens } from './query-term-visibility.js';
-import { formatDateLabel, formatDuration } from './temporal-format.js';
+import { appendTimelineSummary } from './timeline-summary.js';
 
 /**
  * Packaging observability signal — records whether and how packaging
@@ -157,80 +157,7 @@ function formatSubjectSection(ns: string, groupMemories: SearchResult[]): string
 
 /** Join sections and append temporal summary if present. */
 function appendTemporalSummary(sections: string[], memories: SearchResult[]): string {
-  const sortedAll = sortChronologically(memories);
-  const timeline = buildTemporalSummary(sortedAll);
-  const mainContent = sections.join('\n\n');
-  return timeline ? `${mainContent}\n\n${timeline}` : mainContent;
-}
-
-/**
- * Build a timeline summary with computed time gaps between distinct dates.
- * Helps weak LLMs answer temporal questions without doing date arithmetic.
- */
-function buildTemporalSummary(sortedMemories: SearchResult[]): string {
-  const uniqueDates = getUniqueDates(sortedMemories);
-  if (uniqueDates.length < 2) return '';
-
-  const gaps: string[] = [];
-  for (let i = 1; i < uniqueDates.length; i++) {
-    const prev = uniqueDates[i - 1];
-    const curr = uniqueDates[i];
-    const diffMs = curr.getTime() - prev.getTime();
-    const diffDays = Math.round(diffMs / 86400000);
-    if (diffDays === 0) continue;
-    const duration = formatDuration(diffDays);
-    gaps.push(`- ${formatDateLabel(prev)} → ${formatDateLabel(curr)}: ${duration}`);
-  }
-
-  if (gaps.length === 0) return '';
-
-  const first = uniqueDates[0];
-  const last = uniqueDates[uniqueDates.length - 1];
-  const totalDays = Math.round((last.getTime() - first.getTime()) / 86400000);
-  const totalLine = `Total span: ${formatDateLabel(first)} to ${formatDateLabel(last)} (${formatDuration(totalDays)})`;
-  const evidenceLines = buildTemporalEvidenceLines(sortedMemories, uniqueDates);
-  const evidenceBlock = evidenceLines.length > 0
-    ? `\nKey temporal evidence:\n${evidenceLines.join('\n')}`
-    : '';
-
-  return `Timeline:\n${gaps.join('\n')}\n${totalLine}${evidenceBlock}`;
-}
-
-function getUniqueDates(memories: SearchResult[]): Date[] {
-  const seen = new Set<string>();
-  const dates: Date[] = [];
-  for (const m of memories) {
-    const key = m.created_at.toISOString().slice(0, 10);
-    if (!seen.has(key)) {
-      seen.add(key);
-      dates.push(m.created_at);
-    }
-  }
-  return dates;
-}
-
-function buildTemporalEvidenceLines(
-  memories: SearchResult[],
-  dates: Date[],
-): string[] {
-  return dates
-    .slice(0, 4)
-    .map((date) => buildTemporalEvidenceLine(memories, date))
-    .filter((line): line is string => line !== null);
-}
-
-function buildTemporalEvidenceLine(memories: SearchResult[], date: Date): string | null {
-  const key = formatDateLabel(date);
-  const sameDate = memories.filter((memory) => formatDateLabel(memory.created_at) === key);
-  const selected = sameDate.find((memory) => isAnswerBearing(memory.content)) ?? sameDate[0];
-  if (!selected) return null;
-  return `- ${key}: ${truncateTemporalEvidence(selected.content)}`;
-}
-
-function truncateTemporalEvidence(content: string): string {
-  const normalized = content.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= 180) return normalized;
-  return `${normalized.slice(0, 177)}...`;
+  return appendTimelineSummary(sections, sortChronologically(memories));
 }
 
 export function formatInjection(
