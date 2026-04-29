@@ -19,7 +19,7 @@ import {
   type ExtractionOptions,
 } from './observation-date-extraction.js';
 
-const EXTRACTION_MAX_TOKENS = 4096;
+const EXTRACTION_MAX_TOKENS = 8192;
 const AUDN_MAX_TOKENS = 2048;
 
 export type { ExtractionOptions };
