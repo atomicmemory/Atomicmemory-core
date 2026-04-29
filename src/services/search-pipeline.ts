@@ -36,6 +36,7 @@ import { DEFAULT_RRF_K, weightedRRF } from './rrf-fusion.js';
 import { applyIterativeRetrieval } from './iterative-retrieval.js';
 import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
+import { applyInstructionBoost } from './instruction-boost.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 
@@ -59,6 +60,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'entityGraphEnabled'
   | 'entitySearchMinSimilarity'
   | 'hybridSearchEnabled'
+  | 'instructionBoostEnabled'
+  | 'instructionBoostWeight'
   | 'iterativeRetrievalEnabled'
   | 'linkExpansionBeforeMMR'
   | 'linkExpansionEnabled'
@@ -758,7 +761,30 @@ function applyRankingProtectionStages(
     state = { ...state, candidates: currentStateRanked.results };
   }
 
+  state = applyInstructionBoostStage(query, state, trace, policyConfig);
+
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
+}
+
+/**
+ * Wraps `applyInstructionBoost` with trace emission. No-op when the feature
+ * flag is off (the boost function itself short-circuits). EXP-05.
+ */
+function applyInstructionBoostStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  if (!policyConfig.instructionBoostEnabled) return state;
+  const boosted = applyInstructionBoost(state.candidates, query, {
+    instructionBoostEnabled: policyConfig.instructionBoostEnabled,
+    instructionBoostWeight: policyConfig.instructionBoostWeight,
+  });
+  trace.stage('instruction-boost', boosted, {
+    weight: policyConfig.instructionBoostWeight,
+  });
+  return { ...state, candidates: boosted };
 }
 
 function applySubjectRankingStage(

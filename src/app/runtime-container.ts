@@ -84,6 +84,8 @@ export interface CoreRuntimeConfig {
   entityGraphEnabled: boolean;
   entitySearchMinSimilarity: number;
   hybridSearchEnabled: boolean;
+  instructionBoostEnabled: boolean;
+  instructionBoostWeight: number;
   iterativeRetrievalEnabled: boolean;
   lessonsEnabled: boolean;
   linkExpansionBeforeMMR: boolean;

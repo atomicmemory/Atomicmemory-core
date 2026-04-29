@@ -10,6 +10,52 @@ export interface MemoryMetadata {
 }
 
 /**
+ * Metadata keys that core treats as load-bearing internals at runtime —
+ * lineage/claim, dedup, extraction outputs, consolidation, lesson
+ * extraction, and AUDN mutation. Inbound caller-controlled metadata
+ * MUST NOT include any of these; `IngestBodySchema` rejects with 400.
+ *
+ * Adding a new internal `metadata.<key>` access in core MUST add the
+ * key here, or the new key becomes spoofable from outside. The
+ * static-analysis test in `src/__tests__/reserved-metadata-keys.test.ts`
+ * enforces this: it scans `src/` for metadata access patterns and
+ * fails CI if any found key is missing from this set.
+ */
+export const RESERVED_METADATA_KEYS = new Set<string>([
+  // Lineage / claim — `src/services/memory-storage.ts`
+  'cmo_id',
+  // Deduplication — `src/services/composite-dedup.ts`,
+  // `src/services/ingest-post-write.ts`
+  'memberMemoryIds',
+  'compositeVersion',
+  // Extraction — `src/services/memcell-projection.ts`
+  'headline',
+  'entities',
+  'relations',
+  'keywords',
+  // Consolidation — `src/services/consolidation-service.ts`
+  'consolidated_from',
+  'cluster_size',
+  'avg_affinity',
+  // Lesson extraction — `src/services/lesson-service.ts`
+  'sourceSite',
+  'findingCount',
+  'rules',
+  'trustScore',
+  'threshold',
+  'contradictionConfidence',
+  'supersededMemoryId',
+  // AUDN mutation — `src/services/memory-audn.ts`
+  'clarification_note',
+  'target_memory_id',
+  'contradiction_confidence',
+  // Instruction tagging — `src/services/extraction-enrichment.ts` (EXP-05)
+  'fact_role',
+  // Recency bins — `src/services/temporal-fingerprint.ts` (EXP-12)
+  'recency_bin',
+]);
+
+/**
  * Shared write-shape for memory rows. Used by the repository write path
  * and the MemoryStore interface so the two stay in lockstep.
  */
