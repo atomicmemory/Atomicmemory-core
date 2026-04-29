@@ -272,6 +272,7 @@ export interface IngestRuntimeConfig {
   extractionCacheEnabled: boolean;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
+  genericEventAnchorEnabled: boolean;
   entityGraphEnabled: boolean;
   entropyGateAlpha: number;
   entropyGateEnabled: boolean;
