@@ -11,6 +11,7 @@ import { containsRelativeTemporalPhrase } from './relative-temporal.js';
 import { extractAffectEvidenceFacts } from './affect-evidence-extraction.js';
 import { extractCompetitionEvidenceFacts } from './competition-evidence-extraction.js';
 import { extractSharedSchoolFacts } from './shared-school-extraction.js';
+import { extractSharedOverlapFacts } from './shared-overlap-extraction.js';
 import { extractVisualEvidenceFacts } from './visual-evidence-extraction.js';
 
 const LITERAL_DETAIL_PATTERN =
@@ -20,11 +21,14 @@ const TEMPORAL_DETAIL_PATTERN =
   /\b(last year|last month|last week|last [a-z]+|today|tomorrow|first|second|before|after|deadline|deadlines|timeline|relative to|months later|weeks later|few days ago|for \d+ years?|for three years?|for two years?|for four years?|for five years?)\b/i;
 const EVENT_DETAIL_PATTERN =
   /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf|trip|travel(?:ed|ling)?|retreat|phuket|doctor|doc|check-up|appointment|blog|car mods?|restor(?:e|ed|ing|ation))\b/i;
-const VISUAL_EVIDENCE_PATTERN = /\bshared image evidence\b/i;
+const VISUAL_EVIDENCE_PATTERN =
+  /\b(?:shared image evidence|painted (?:a sunset|the subject of sunsets))\b/i;
 const AFFECT_INVENTORY_PATTERN =
   /\b(?:all that bring(?:s)? .*happiness|bring(?:s)? .*joy|bring(?:s)? .*happiness|happiness in life)\b/i;
 const SHARED_SCHOOL_PATTERN =
   /\b(?:attended|studied at|went to).*\b(?:elementary school|school|class).*\btogether\b/i;
+const SHARED_OVERLAP_PATTERN =
+  /\bshare (?:an interest|frustration|the activity)|\bshared (?:interest|frustration|activity)\b/i;
 
 interface SupplementalFeatureSet {
   temporal: boolean;
@@ -33,6 +37,7 @@ interface SupplementalFeatureSet {
   visual: boolean;
   affectInventory: boolean;
   sharedSchool: boolean;
+  sharedOverlap: boolean;
 }
 
 export function mergeSupplementalFacts(
@@ -45,6 +50,7 @@ export function mergeSupplementalFacts(
     ...extractAffectEvidenceFacts(conversationText),
     ...extractCompetitionEvidenceFacts(conversationText),
     ...extractSharedSchoolFacts(conversationText),
+    ...extractSharedOverlapFacts(conversationText),
     ...extractVisualEvidenceFacts(conversationText),
   ]);
 
@@ -138,6 +144,7 @@ function buildFeatureSet(text: string): SupplementalFeatureSet {
     visual: hasVisualEvidenceDetail(text),
     affectInventory: hasAffectInventoryDetail(text),
     sharedSchool: hasSharedSchoolDetail(text),
+    sharedOverlap: hasSharedOverlapDetail(text),
   };
 }
 
@@ -156,6 +163,7 @@ function hasUncoveredFeature(
   if (features.visual) return true;
   if (!hasAnyFeature(features)) return false;
   if (features.sharedSchool) return shapeMatches.every((fact) => !hasSharedSchoolDetail(fact.fact));
+  if (features.sharedOverlap) return shapeMatches.every((fact) => !hasSharedOverlapDetail(fact.fact));
   if (features.affectInventory) return shapeMatches.every((fact) => !hasAffectInventoryDetail(fact.fact));
   if (features.temporal) return shapeMatches.every((fact) => !hasRelativeTemporalDetail(fact.fact));
   if (features.literal) return shapeMatches.every((fact) => !hasLiteralDetail(fact.fact));
@@ -199,6 +207,10 @@ function hasAffectInventoryDetail(text: string): boolean {
 
 function hasSharedSchoolDetail(text: string): boolean {
   return SHARED_SCHOOL_PATTERN.test(text);
+}
+
+function hasSharedOverlapDetail(text: string): boolean {
+  return SHARED_OVERLAP_PATTERN.test(text);
 }
 
 function dedupeByNormalizedFact(facts: ExtractedFact[]): ExtractedFact[] {

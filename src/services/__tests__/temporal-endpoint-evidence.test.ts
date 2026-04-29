@@ -62,6 +62,28 @@ describe('buildRepeatedEventEndpointBlock', () => {
     expect(block).toContain('earliest matching event: 2022-08-10');
     expect(block).toContain('latest matching event: 2022-10-31');
     expect(block).toContain('elapsed between endpoints: ~3 months (82 days)');
+    expect(block).not.toContain('coarse calendar-month span');
+  });
+
+  it('emits a coarse calendar-month span for approximate month-level endpoints', () => {
+    const block = buildTemporalEvidenceBlock([
+      makeMemory('first', 'Joanna recently started writing a book.', '2022-07-10'),
+      makeMemory('second', 'Joanna finished writing her book last week.', '2022-10-06'),
+    ], 'How long did it take for Joanna to finish writing her book?');
+
+    expect(block).toContain('elapsed between endpoints: ~3 months (88 days)');
+    expect(block).toContain('coarse calendar-month span: 4 months');
+    expect(block).toContain('July 2022 through October 2022');
+  });
+
+  it('omits coarse spans for explicit how-many-month questions', () => {
+    const block = buildTemporalEvidenceBlock([
+      makeMemory('first', 'Andrew recently adopted Buddy.', '2023-10-19'),
+      makeMemory('second', 'Andrew recently adopted Scout.', '2023-11-22'),
+    ], 'How many months passed between Andrew adopting Buddy and Scout?');
+
+    expect(block).toContain('elapsed between endpoints: ~1 month (34 days)');
+    expect(block).not.toContain('coarse calendar-month span');
   });
 
   it('normalizes common temporal verb forms when selecting general evidence', () => {

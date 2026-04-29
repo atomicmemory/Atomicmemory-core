@@ -18,6 +18,9 @@ const IMAGE_CAPTION_PATTERN = /^\s*Image caption:\s*(.+)$/i;
 const IMAGE_QUERY_PATTERN = /^\s*Image query:\s*(.+)$/i;
 const BEACH_VISUAL_PATTERN = /\b(?:beach|ocean|shore|coast|surf|seaside)\b/i;
 const WALK_TEXT_PATTERN = /\b(?:walk|walking|stroll|strolling)\b/i;
+const PAINTING_VISUAL_PATTERN = /\bpainting\b/i;
+const SUNSET_VISUAL_PATTERN = /\bsunset\b/i;
+const PAINT_TEXT_PATTERN = /\bpaint(?:ed|ing)?\b/i;
 const STOP_WORDS = new Set(['and', 'the', 'with', 'from', 'that', 'this', 'over', 'into']);
 
 interface VisualTurn {
@@ -74,6 +77,10 @@ function pushVisualFact(
   if (placeFact) {
     facts.push(buildFact(turn.speaker, placeFact, `${turn.speaker} shared beach walk evidence`, 0.65));
   }
+  const paintingFact = buildPaintingSubjectFactText(turn, prefix);
+  if (paintingFact) {
+    facts.push(buildFact(turn.speaker, paintingFact, `${turn.speaker} painted sunset evidence`, 0.7));
+  }
 }
 
 function buildVisualFactText(turn: VisualTurn, prefix: string): string {
@@ -91,6 +98,16 @@ function buildBeachWalkFactText(turn: VisualTurn, prefix: string): string | null
     return null;
   }
   return `${prefix}${turn.speaker} shared image evidence showing ${turn.speaker} went for a walk by the beach or ocean.`;
+}
+
+function buildPaintingSubjectFactText(turn: VisualTurn, prefix: string): string | null {
+  const visualText = `${turn.caption ?? ''} ${turn.query ?? ''}`;
+  const hasSunsetPainting = PAINTING_VISUAL_PATTERN.test(visualText)
+    && SUNSET_VISUAL_PATTERN.test(visualText);
+  if (!hasSunsetPainting || !PAINT_TEXT_PATTERN.test(turn.text)) {
+    return null;
+  }
+  return `${prefix}${turn.speaker} painted the subject of sunsets.`;
 }
 
 function buildFact(

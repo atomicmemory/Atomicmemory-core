@@ -215,6 +215,51 @@ describe('mergeSupplementalFacts', () => {
     expect(merged.some((fact) => fact.fact === primary.fact)).toBe(false);
   });
 
+  it('backfills shared movie and dessert interests from overlap evidence', () => {
+    const merged = mergeSupplementalFacts(
+      [],
+      [
+        '[Session date: 2022-01-21]',
+        'Joanna: Besides writing, I also enjoy reading, watching movies, and exploring nature.',
+        'Nate: Playing video games and watching movies are my main hobbies.',
+        'Joanna: Cool, Nate! So we both have similar interests.',
+        'Nate: I discovered a new way to make coconut milk ice cream.',
+        'Joanna: Love your creations!',
+      ].join('\n'),
+    );
+
+    expect(merged.some((fact) => fact.fact.includes('Joanna and Nate share an interest in watching movies.'))).toBe(true);
+    expect(merged.some((fact) => fact.fact.includes('Nate and Joanna share an interest in making desserts and baking.'))).toBe(true);
+  });
+
+  it('backfills shared pet-friendly-spots frustration from empathy evidence', () => {
+    const merged = mergeSupplementalFacts(
+      [],
+      [
+        '[Session date: 2023-07-03]',
+        'Andrew: I understand how it feels missing the peace of being out on the trails.',
+        'Audrey: I get how frustrating it can be not to find pet-friendly spots.',
+      ].join('\n'),
+    );
+
+    expect(merged.some((fact) => fact.fact === 'Audrey and Andrew share frustration about not being able to find pet-friendly spots.')).toBe(true);
+  });
+
+  it('backfills shared car-work activity from restoration evidence', () => {
+    const merged = mergeSupplementalFacts(
+      [],
+      [
+        '[Session date: 2023-10-04]',
+        'Calvin: Also, check out this project - I love working on it to chill out.',
+        '  Image caption: a photo of a shiny orange car with a hood open',
+        '  Image query: sleek vintage car restoration',
+        'Dave: Working on cars really helps me relax.',
+      ].join('\n'),
+    );
+
+    expect(merged.some((fact) => fact.fact.includes('Calvin and Dave share the activity of working on cars.'))).toBe(true);
+  });
+
   it('backfills tournament-win facts when the primary extractor misses them', () => {
     const merged = mergeSupplementalFacts(
       [baseFact({ fact: 'As of August 22 2022, Nate makes a living as a professional gamer and is passionate about his career.' })],
@@ -268,6 +313,20 @@ describe('mergeSupplementalFacts', () => {
     );
 
     expect(merged.some((fact) => fact.fact.includes('John went for a walk by the beach or ocean'))).toBe(true);
+  });
+
+  it('derives painted-sunset subjects from visual painting evidence', () => {
+    const merged = mergeSupplementalFacts(
+      [],
+      [
+        '[Session date: 2023-08-25T13:33:00.000Z]',
+        "Caroline: Nah, I haven't. I've been busy painting - here's something I just finished.",
+        '  Image caption: a photo of a painting of a sunset on a small easel',
+        '  Image query: vibrant sunset beach painting',
+      ].join('\n'),
+    );
+
+    expect(merged.some((fact) => fact.fact === 'As of August 25, 2023, Caroline painted the subject of sunsets.')).toBe(true);
   });
 
   it('keeps multiple unique visual facts from the same speaker', () => {

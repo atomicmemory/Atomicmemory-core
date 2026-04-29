@@ -9,11 +9,15 @@
 
 import type { SearchResult } from '../db/memory-repository.js';
 import { formatDateLabel, formatDuration } from './temporal-format.js';
+import {
+  diffDays,
+  formatCoarseCalendarSpanLine,
+  formatEndpointLine,
+} from './temporal-evidence-format.js';
 
 const REPEATED_EVENT_QUERY = /\bbetween\b[\s\S]*\bfirst\b[\s\S]*\bsecond\b|\bfirst\b[\s\S]*\bsecond\b/i;
 const TEMPORAL_QUERY = /\b(when|how long|how many months|how many years|how many weeks|how many days|between|before|after|as of|recently)\b/i;
 const DURATION_QUERY = /\b(how long|how many months|how many years|how many weeks|how many days|between|before|after)\b/i;
-const EVIDENCE_MAX_CHARS = 160;
 const QUERY_TERM_MIN_LENGTH = 4;
 const GENERAL_TEMPORAL_LIMIT = 3;
 const STEM_SUFFIXES = ['ing', 'ed', 'es', 's'];
@@ -329,14 +333,25 @@ function buildGeneralDurationEndpointLines(
   if (!DURATION_QUERY.test(query.toLowerCase())) return [];
   const selected = selectDurationEndpoints(candidates);
   if (selected.length < DURATION_ENDPOINT_LIMIT) return [];
-  return [
+  const endpointLines = [
     formatEndpointLine('earliest matching event', selected[0]),
     formatEndpointLine('latest matching event', selected[1]),
-    `- elapsed between endpoints: ${formatDuration(diffDays(
-      selected[0].memory.created_at,
-      selected[1].memory.created_at,
-    ))}`,
   ];
+  const coarseSpanLine = acceptsCoarseCalendarSpan(query)
+    ? formatCoarseCalendarSpanLine(selected[0], selected[1])
+    : null;
+  const elapsedLine = `- elapsed between endpoints: ${formatDuration(diffDays(
+    selected[0].memory.created_at,
+    selected[1].memory.created_at,
+  ))}`;
+  return coarseSpanLine
+    ? [...endpointLines, coarseSpanLine, elapsedLine]
+    : [...endpointLines, elapsedLine];
+}
+
+function acceptsCoarseCalendarSpan(query: string): boolean {
+  const normalized = query.toLowerCase();
+  return /\bhow long\b/.test(normalized) && !/\bhow many\b/.test(normalized);
 }
 
 function selectDurationEndpoints(candidates: TemporalCandidate[]): TemporalCandidate[] {
@@ -384,18 +399,4 @@ function selectDistinctDateEndpoints(candidates: EndpointCandidate[]): EndpointC
   return [...byDate.values()].sort((left, right) =>
     left.memory.created_at.getTime() - right.memory.created_at.getTime(),
   ).slice(0, 2);
-}
-
-function formatEndpointLine(label: string, candidate: EndpointCandidate): string {
-  return `- ${label}: ${candidate.dateKey} — ${truncateEvidence(candidate.memory.content)}`;
-}
-
-function truncateEvidence(content: string): string {
-  const normalized = content.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= EVIDENCE_MAX_CHARS) return normalized;
-  return `${normalized.slice(0, EVIDENCE_MAX_CHARS - 3)}...`;
-}
-
-function diffDays(first: Date, second: Date): number {
-  return Math.round((second.getTime() - first.getTime()) / 86400000);
 }

@@ -23,6 +23,8 @@ import type { RetrievalMode } from './memory-service-types.js';
 import { escapeXml } from '../xml-escape.js';
 import { spansMultipleDates, buildTimelinePack, formatTimelinePack } from './timeline-pack.js';
 import { buildTemporalEvidenceBlock } from './temporal-endpoint-evidence.js';
+import { buildSharedOverlapEvidenceBlock } from './shared-overlap-evidence.js';
+import { buildAnswerDetailEvidenceBlock } from './answer-detail-evidence.js';
 import { preserveQueryTermVisibility, sumAssignmentTokens } from './query-term-visibility.js';
 import { appendTimelineSummary } from './timeline-summary.js';
 
@@ -245,9 +247,9 @@ export function formatTieredInjection(
   const sections = expandableIds
     ? [lines.join('\n'), `Expandable IDs: ${expandableIds}`]
     : [lines.join('\n')];
-  const temporalEvidenceBlock = buildTemporalEvidenceBlock(sorted, query);
-  if (temporalEvidenceBlock) {
-    return [...sections, temporalEvidenceBlock].join('\n\n');
+  const evidenceBlocks = buildQueryEvidenceBlocks(sorted, query);
+  if (evidenceBlocks.length > 0) {
+    return [...sections, ...evidenceBlocks].join('\n\n');
   }
   return appendTemporalSummary(sections, memories);
 }
@@ -293,22 +295,19 @@ export function buildInjection(
   }
 
   if (mode === 'flat') {
-    return { injectionText: formatSimpleInjection(memories) };
+    return { injectionText: appendQueryEvidence(formatSimpleInjection(memories), memories, query) };
   }
 
   const deduplicated = deduplicateCompositeMembersHard(memories);
   const budget = tokenBudget ?? DEFAULT_INJECTION_TOKEN_BUDGET;
   const forceRichTopHit = prefersAbstractAwareRetrieval(mode, query);
 
-  // Compute the temporal evidence block before tier assignment so
-  // its token cost is subtracted from the assignment budget. Otherwise the
-  // appended block silently exceeds the caller's budget and is missing
-  // from estimatedContextTokens. The block is appended inside
-  // formatTieredInjection; we just account for its tokens up front.
+  // Compute query-aware evidence blocks before tier assignment so their token
+  // cost is subtracted from the assignment budget. Otherwise appended blocks
+  // silently exceed the caller's budget and estimatedContextTokens is stale.
   const sortedForEndpoints = sortChronologically(deduplicated);
-  const endpointBlock = buildTemporalEvidenceBlock(sortedForEndpoints, query);
-  const endpointTokens = endpointBlock ? estimateTokens(endpointBlock) : 0;
-  const assignmentBudget = Math.max(0, budget - endpointTokens);
+  const evidenceTokens = estimateQueryEvidenceTokens(sortedForEndpoints, query);
+  const assignmentBudget = Math.max(0, budget - evidenceTokens);
 
   const result = assignTierBudgets(deduplicated, assignmentBudget, { forceRichTopHit });
   const assignments = preserveQueryTermVisibility(deduplicated, result.assignments, query, assignmentBudget);
@@ -320,6 +319,31 @@ export function buildInjection(
     injectionText: formatTieredInjection(deduplicated, assignments, query),
     tierAssignments: assignments,
     expandIds: expandIds.length > 0 ? expandIds : undefined,
-    estimatedContextTokens: sumAssignmentTokens(assignments) + endpointTokens,
+    estimatedContextTokens: sumAssignmentTokens(assignments) + evidenceTokens,
   };
+}
+
+function appendQueryEvidence(
+  injectionText: string,
+  memories: SearchResult[],
+  query: string,
+): string {
+  const blocks = buildQueryEvidenceBlocks(sortChronologically(memories), query);
+  if (blocks.length === 0) return injectionText;
+  return [injectionText, ...blocks].join('\n\n');
+}
+
+function buildQueryEvidenceBlocks(memories: SearchResult[], query: string): string[] {
+  return [
+    buildSharedOverlapEvidenceBlock(memories, query),
+    buildAnswerDetailEvidenceBlock(memories, query),
+    buildTemporalEvidenceBlock(memories, query),
+  ].filter((block) => block.length > 0);
+}
+
+function estimateQueryEvidenceTokens(memories: SearchResult[], query: string): number {
+  return buildQueryEvidenceBlocks(memories, query).reduce(
+    (total, block) => total + estimateTokens(block),
+    0,
+  );
 }
