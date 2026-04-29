@@ -137,6 +137,8 @@ export interface RuntimeConfig {
   instructionBoostWeight: number;
   temporalQueryConstraintEnabled: boolean;
   temporalQueryConstraintBoost: number;
+  recencyBinBoostEnabled: boolean;
+  recencyBinBoostWeight: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -386,6 +388,8 @@ export const config: RuntimeConfig = {
   instructionBoostWeight: parseFloat(optionalEnv('INSTRUCTION_BOOST_WEIGHT') ?? '0.15'),
   temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
+  recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
+  recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -528,6 +532,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'instructionBoostEnabled', 'instructionBoostWeight',
   // Temporal query selection
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
+  // Recency-bin boost (EXP-12)
+  'recencyBinBoostEnabled', 'recencyBinBoostWeight',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred

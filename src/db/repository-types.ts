@@ -51,7 +51,7 @@ export const RESERVED_METADATA_KEYS = new Set<string>([
   'contradiction_confidence',
   // Instruction tagging — `src/services/extraction-enrichment.ts` (EXP-05)
   'fact_role',
-  // Recency bins — `src/services/temporal-fingerprint.ts` (EXP-12)
+  // Recency bin breadcrumb — `src/services/memory-storage.ts` (EXP-12)
   'recency_bin',
 ]);
 

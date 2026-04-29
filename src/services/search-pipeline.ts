@@ -37,6 +37,7 @@ import { applyIterativeRetrieval } from './iterative-retrieval.js';
 import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
+import { applyRecencyBinBoost } from './recency-bin-ranking.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 
@@ -83,6 +84,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'repairDeltaThreshold'
   | 'repairLoopEnabled'
   | 'repairLoopMinSimilarity'
+  | 'recencyBinBoostEnabled'
+  | 'recencyBinBoostWeight'
   | 'rerankSkipMinGap'
   | 'rerankSkipTopSimilarity'
   | 'retrievalProfileSettings'
@@ -698,6 +701,7 @@ async function applyExpansionAndReranking(
     temporalAnchorFingerprints,
     trace,
     policyConfig,
+    referenceTime,
   );
 
   return selectAndExpandCandidates(
@@ -750,6 +754,7 @@ function applyRankingProtectionStages(
   temporalAnchorFingerprints: string[],
   trace: TraceCollector,
   policyConfig: SearchPipelineRuntimeConfig,
+  referenceTime: Date | undefined,
 ): RankedCandidateState {
   let state = applySubjectRankingStage(query, candidates, temporalAnchorFingerprints, trace);
   state = applyLiteralProtectionStage(query, state, trace, policyConfig);
@@ -762,6 +767,14 @@ function applyRankingProtectionStages(
   }
 
   state = applyInstructionBoostStage(query, state, trace, policyConfig);
+  state = applyRecencyBinStage(
+    query,
+    state,
+    trace,
+    policyConfig,
+    referenceTime,
+    currentStateRanked.triggered,
+  );
 
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
 }
@@ -785,6 +798,30 @@ function applyInstructionBoostStage(
     weight: policyConfig.instructionBoostWeight,
   });
   return { ...state, candidates: boosted };
+}
+
+function applyRecencyBinStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+  referenceTime: Date | undefined,
+  currentStateTriggered: boolean,
+): RankedCandidateState {
+  if (!policyConfig.recencyBinBoostEnabled) return state;
+  const boost = applyRecencyBinBoost({
+    query,
+    candidates: state.candidates,
+    weight: policyConfig.recencyBinBoostWeight,
+    referenceTime: referenceTime ?? new Date(),
+    currentStateTriggered,
+  });
+  if (!boost.applied) return state;
+  trace.stage('recency-bin-boost', boost.results, {
+    queryBin: boost.queryBin,
+    weight: policyConfig.recencyBinBoostWeight,
+  });
+  return { ...state, candidates: boost.results };
 }
 
 function applySubjectRankingStage(

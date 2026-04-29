@@ -6,7 +6,7 @@
 
 import type { SearchResult } from '../db/repository-types.js';
 import type { SearchStore } from '../db/stores.js';
-import { buildTemporalFingerprint } from './temporal-fingerprint.js';
+import { buildTemporalFingerprint, type RecencyBin } from './temporal-fingerprint.js';
 
 const TEMPORAL_MARKERS = [
   'before',
@@ -177,4 +177,45 @@ function buildBigrams(words: string[]): string[] {
 
 function isCompactHighSignalToken(word: string): boolean {
   return /^[A-Z]{3,}$/.test(word) || /[A-Z]/.test(word.slice(1));
+}
+
+/**
+ * Map natural-language recency markers in a query to a log-spaced bin
+ * (see `temporal-fingerprint.ts:RecencyBin`). Returns `null` when no
+ * marker matches — callers MUST treat that as "no preference" and
+ * skip any bin-based boost rather than guessing a default bin.
+ *
+ * Patterns are checked youngest → oldest; the first match wins so that
+ * "just now" outranks "now" alone.
+ */
+const QUERY_BIN_PATTERNS: ReadonlyArray<{ readonly pattern: RegExp; readonly bin: RecencyBin }> = [
+  { pattern: /\bjust\s+now\b/, bin: '1m' },
+  { pattern: /\bright\s+now\b/, bin: '1m' },
+  { pattern: /\bmoments?\s+ago\b/, bin: '1m' },
+  { pattern: /\b(?:in\s+the\s+)?last\s+(?:few\s+)?minutes?\b/, bin: '10m' },
+  { pattern: /\bminutes?\s+ago\b/, bin: '10m' },
+  { pattern: /\b(?:an?\s+)?hour\s+ago\b/, bin: '1h' },
+  { pattern: /\bhours?\s+ago\b/, bin: '10h' },
+  { pattern: /\b(?:earlier\s+)?today\b/, bin: '10h' },
+  { pattern: /\bthis\s+morning\b/, bin: '10h' },
+  { pattern: /\bthis\s+afternoon\b/, bin: '10h' },
+  { pattern: /\byesterday\b/, bin: '1d' },
+  { pattern: /\bthis\s+week\b/, bin: '1d' },
+  { pattern: /\brecent(?:ly)?\b/, bin: '1d' },
+  { pattern: /\blast\s+week\b/, bin: '10d' },
+  { pattern: /\b(?:a\s+)?few\s+days\s+ago\b/, bin: '10d' },
+  { pattern: /\blast\s+month\b/, bin: '100d' },
+  { pattern: /\bweeks?\s+ago\b/, bin: '10d' },
+  { pattern: /\bmonths?\s+ago\b/, bin: '100d' },
+  { pattern: /\blong\s+ago\b/, bin: 'older' },
+  { pattern: /\byears?\s+ago\b/, bin: 'older' },
+  { pattern: /\ba\s+long\s+time\s+ago\b/, bin: 'older' },
+];
+
+export function inferQueryBin(query: string, _now: Date): RecencyBin | null {
+  const lower = ` ${query.toLowerCase()} `;
+  for (const { pattern, bin } of QUERY_BIN_PATTERNS) {
+    if (pattern.test(lower)) return bin;
+  }
+  return null;
 }

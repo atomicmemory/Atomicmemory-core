@@ -15,6 +15,7 @@ import { generateL1Overview } from './tiered-context.js';
 import { emitAuditEvent } from './audit-events.js';
 import { derivePersistedClaimSlot } from './memory-crud.js';
 import { emitLineageEvent } from './memory-lineage.js';
+import { assignRecencyBin } from './temporal-fingerprint.js';
 import type {
   AudnFactContext,
   ClaimTarget,
@@ -107,11 +108,16 @@ export async function storeProjection(
 
   const overview = generateL1Overview(fact.fact);
   const network = fact.network ?? classifyNetwork(fact as any).network;
+  const ingestNow = new Date();
+  const createdAt = options.logicalTimestamp ?? ingestNow;
+  const recencyBin = assignRecencyBin(createdAt, ingestNow);
+  const baseMetadata: Record<string, unknown> = { recency_bin: recencyBin };
+  if (options.cmoId) baseMetadata.cmo_id = options.cmoId;
   const memoryId = await deps.stores.memory.storeMemory({
     userId, content: fact.fact, embedding,
     memoryType: fact.type === 'knowledge' ? 'semantic' : 'episodic',
     importance: fact.importance, sourceSite, sourceUrl, episodeId,
-    metadata: mergeStoreMetadata(options.cmoId, fact.metadata),
+    metadata: { ...baseMetadata, ...fact.metadata },
     keywords: fact.keywords.join(' '),
     namespace: namespace ?? undefined,
     summary: fact.headline,
