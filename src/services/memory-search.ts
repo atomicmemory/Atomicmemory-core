@@ -63,11 +63,11 @@ async function executeSearchStep(
   retrievalOptions: RetrievalOptions | undefined,
   asOf: string | undefined,
   trace: TraceCollector,
-): Promise<{ memories: SearchResult[]; activeTrace: TraceCollector }> {
+): Promise<{ memories: SearchResult[]; activeTrace: TraceCollector; retrievalConfidence: import('./retrieval-confidence-gate.js').RetrievalConfidence | null }> {
   if (asOf) {
     const memories = await deps.stores.claim.searchClaimVersions(userId, await embedText(query, 'query'), effectiveLimit, asOf, sourceSite);
     trace.stage('as-of-search', memories, { asOf });
-    return { memories, activeTrace: trace };
+    return { memories, activeTrace: trace, retrievalConfidence: null };
   }
   const pipelineStores = { search: deps.stores.search, link: deps.stores.link, memory: deps.stores.memory, entity: deps.stores.entity, pool: deps.stores.pool };
   const pipelineResult = await runSearchPipelineWithTrace(pipelineStores, userId, query, effectiveLimit, sourceSite, referenceTime, {
@@ -78,7 +78,7 @@ async function executeSearchStep(
     skipReranking: retrievalOptions?.skipReranking,
     runtimeConfig: deps.config,
   });
-  return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace };
+  return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace, retrievalConfidence: pipelineResult.retrievalConfidence };
 }
 
 /** Filter workspace-scoped, stale composites, and consensus-violating memories. */
@@ -135,6 +135,7 @@ function assembleResponse(
   asOf: string | undefined,
   sourceSite: string | undefined,
   lessonCheck: LessonCheckResult | undefined,
+  retrievalConfidence: import('./retrieval-confidence-gate.js').RetrievalConfidence | null,
 ): RetrievalResult {
   const mode = retrievalOptions?.retrievalMode ?? 'flat';
   const packaged = applyFlatPackagingPolicy(postProcessed.memories, query, mode, activeTrace);
@@ -150,7 +151,7 @@ function assembleResponse(
   });
   activeTrace.finalize(outputMemories);
 
-  return {
+  const result: RetrievalResult = {
     memories: outputMemories, injectionText,
     citations: buildRichCitations(outputMemories).map((c) => c.memory_id),
     retrievalMode: mode, tierAssignments, expandIds, estimatedContextTokens,
@@ -159,6 +160,10 @@ function assembleResponse(
     retrievalSummary: activeTrace.getRetrievalSummary(),
     packagingSummary, assemblySummary,
   };
+  if (retrievalConfidence) {
+    result.retrievalConfidence = retrievalConfidence;
+  }
+  return result;
 }
 
 /** Full search with lesson check, URI resolution, pipeline, post-processing, and packaging. */
@@ -185,9 +190,9 @@ export async function performSearch(
   const uriResult = await tryUriResolution(deps, query, userId, retrievalOptions, trace);
   if (uriResult) return uriResult;
 
-  const { memories: rawMemories, activeTrace } = await executeSearchStep(deps, userId, query, effectiveLimit, sourceSite, referenceTime, namespaceScope, retrievalOptions, asOf, trace);
+  const { memories: rawMemories, activeTrace, retrievalConfidence } = await executeSearchStep(deps, userId, query, effectiveLimit, sourceSite, referenceTime, namespaceScope, retrievalOptions, asOf, trace);
   const filteredMemories = await postProcessResults(deps, rawMemories, activeTrace, userId, query, asOf);
-  return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
+  return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck, retrievalConfidence);
 }
 
 /**

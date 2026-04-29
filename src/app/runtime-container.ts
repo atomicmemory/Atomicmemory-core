@@ -113,6 +113,10 @@ export interface CoreRuntimeConfig {
   retrievalProfileSettings: RetrievalProfile;
   temporalQueryConstraintBoost: number;
   temporalQueryConstraintEnabled: boolean;
+  retrievalConfidenceGateEnabled: boolean;
+  retrievalConfidenceMarginNormalizer: number;
+  retrievalConfidenceSimilarityNormalizer: number;
+  retrievalConfidenceFloor: number;
 }
 
 /** Repositories constructed by the runtime container. */
