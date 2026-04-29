@@ -196,6 +196,7 @@ export interface RetrievalResult {
   retrievalSummary?: import('./retrieval-trace.js').RetrievalTraceSummary;
   packagingSummary?: import('./retrieval-trace.js').PackagingTraceSummary;
   assemblySummary?: import('./retrieval-trace.js').AssemblyTraceSummary;
+  retrievalConfidence?: import('./retrieval-confidence-gate.js').RetrievalConfidence;
 }
 
 /** Options controlling retrieval packaging. */

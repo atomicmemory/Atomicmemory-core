@@ -808,5 +808,13 @@ function formatSearchResponse(result: RetrievalResult, scope: MemoryScope) {
       },
     } : {}),
     ...(observability ? { observability: formatObservability(observability) } : {}),
+    ...(result.retrievalConfidence ? {
+      retrieval_confidence: {
+        low_confidence: result.retrievalConfidence.lowConfidence,
+        confidence: result.retrievalConfidence.confidence,
+        top_similarity: result.retrievalConfidence.topSimilarity,
+        margin: result.retrievalConfidence.margin,
+      },
+    } : {}),
   };
 }

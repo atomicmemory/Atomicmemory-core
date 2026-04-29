@@ -140,6 +140,10 @@ export interface RuntimeConfig {
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  retrievalConfidenceGateEnabled: boolean;
+  retrievalConfidenceMarginNormalizer: number;
+  retrievalConfidenceSimilarityNormalizer: number;
+  retrievalConfidenceFloor: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -392,6 +396,10 @@ export const config: RuntimeConfig = {
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
   recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
+  retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
+  retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.05'),
+  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.5'),
+  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.3'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -537,6 +545,9 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
   'recencyBinBoostEnabled', 'recencyBinBoostWeight',
+  // Retrieval confidence gate (EXP-14)
+  'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
+  'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred
