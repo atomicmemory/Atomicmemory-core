@@ -8,6 +8,7 @@
 
 import { llm } from './llm.js';
 import { withCostStage } from './cost-telemetry.js';
+import { config } from '../config.js';
 import { timed, timedSync } from './timing.js';
 import { normalizeExtractedFacts } from './fact-normalization.js';
 import { enrichExtractedFacts } from './extraction-enrichment.js';
@@ -328,7 +329,7 @@ export async function extractFacts(
       { role: 'system', content: EXTRACTION_PROMPT },
       { role: 'user', content: buildExtractionUserMessage(conversationText, options) },
     ],
-    { temperature: 0, jsonMode: true, maxTokens: EXTRACTION_MAX_TOKENS },
+    { temperature: 0, jsonMode: true, maxTokens: EXTRACTION_MAX_TOKENS, seed: config.llmSeed ?? 42 },
   )));
 
   if (!content) return [];

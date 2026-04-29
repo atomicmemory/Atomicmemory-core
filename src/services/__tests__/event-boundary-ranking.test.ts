@@ -25,7 +25,7 @@ function makeResult(id: string, score: number, metadata?: Record<string, unknown
     session_id: null,
     created_at: new Date(),
     metadata: metadata ?? {},
-  } as SearchResult;
+  } as unknown as SearchResult;
 }
 
 describe('applyEventBoundaryBoost', () => {
