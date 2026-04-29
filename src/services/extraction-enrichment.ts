@@ -17,6 +17,32 @@ const WORKS_ON_MARKERS = ['building', 'working on', 'started', 'created', 'built
 const KNOWS_MARKERS = ['advisor', 'career advice from', 'supportive', 'recommendation letter', 'recommended by'];
 const STUDIES_MARKERS = ['focus on', 'studying', 'research', 'paper on'];
 
+/**
+ * Imperative phrasing markers that flag an extracted fact as an explicit
+ * instruction. Detection is intentionally conservative — false positives on
+ * assistant tutorial content are acceptable since extraction prefixes those
+ * with "Assistant mentioned:". When a marker hits, the fact gains
+ * `metadata.fact_role: 'instruction'` and its importance is floored to 0.95
+ * so lifecycle decay does not evict it.
+ */
+const INSTRUCTION_MARKERS = [
+  'always ',
+  'never ',
+  'from now on',
+  'please remember',
+  'make sure to',
+  "don't forget",
+  'do not forget',
+  'every time',
+  'whenever you',
+  'going forward',
+  'in the future',
+  'remember to',
+] as const;
+
+/** Floor for instruction-tagged importance — see plan EXP-05 risks (2). */
+const INSTRUCTION_IMPORTANCE_FLOOR = 0.95;
+
 const TOOL_NAMES = new Set([
   'React',
   'TypeScript',
@@ -70,7 +96,30 @@ export function enrichExtractedFact(fact: ExtractedFact): ExtractedFact {
     ...inferRelations(fact.fact, withSelf),
   ]);
 
-  return { ...fact, entities: withSelf, relations };
+  return applyInstructionTagging({ ...fact, entities: withSelf, relations });
+}
+
+/**
+ * Detect imperative-phrased facts (always/never/from-now-on/...) and tag
+ * them with `metadata.fact_role: 'instruction'`. Floors importance to
+ * INSTRUCTION_IMPORTANCE_FLOOR so lifecycle decay preserves them.
+ *
+ * Pure: returns the input unchanged when no marker matches.
+ */
+function applyInstructionTagging(fact: ExtractedFact): ExtractedFact {
+  if (!detectInstructionFact(fact.fact)) return fact;
+  const existingMetadata = fact.metadata ?? {};
+  return {
+    ...fact,
+    importance: Math.max(fact.importance, INSTRUCTION_IMPORTANCE_FLOOR),
+    metadata: { ...existingMetadata, fact_role: 'instruction' },
+  };
+}
+
+/** Returns true when the fact text contains an imperative instruction marker. */
+export function detectInstructionFact(text: string): boolean {
+  const lower = ` ${text.toLowerCase()} `;
+  return INSTRUCTION_MARKERS.some((marker) => lower.includes(marker));
 }
 
 function shouldAddSelfEntity(text: string): boolean {

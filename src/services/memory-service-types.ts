@@ -18,6 +18,12 @@ export interface FactInput {
   relations: ExtractedRelation[];
   network?: MemoryNetwork;
   opinionConfidence?: number | null;
+  /**
+   * Structured metadata propagated to the persisted memory's `metadata` map.
+   * Currently used by instruction tagging in `extraction-enrichment.ts`
+   * (key: `fact_role`). Reserved keys enforced by RESERVED_METADATA_KEYS.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ClaimTarget {

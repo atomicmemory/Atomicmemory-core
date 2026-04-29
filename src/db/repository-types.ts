@@ -49,6 +49,8 @@ export const RESERVED_METADATA_KEYS = new Set<string>([
   'clarification_note',
   'target_memory_id',
   'contradiction_confidence',
+  // Instruction tagging — `src/services/extraction-enrichment.ts` (EXP-05)
+  'fact_role',
 ]);
 
 /**

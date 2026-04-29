@@ -166,6 +166,14 @@ export interface ExtractedFact {
   network?: 'world' | 'experience' | 'opinion' | 'observation';
   /** Opinion confidence [0,1], only set when network='opinion'. */
   opinionConfidence?: number | null;
+  /**
+   * Optional structured metadata propagated to the persisted memory's
+   * `metadata` map. Used by post-extraction enrichers (e.g. instruction
+   * tagging in `extraction-enrichment.ts`) to attach retrieval-time signals
+   * without inflating the core extraction surface. Reserved keys are
+   * enforced by the `RESERVED_METADATA_KEYS` drift test.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export type AUDNAction = 'ADD' | 'UPDATE' | 'DELETE' | 'SUPERSEDE' | 'NOOP' | 'CLARIFY';

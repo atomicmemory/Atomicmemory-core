@@ -26,6 +26,7 @@ export function buildAtomicFactProjection(
     importance: fact.importance,
     keywords: fact.keywords,
     metadata: {
+      ...(fact.metadata ?? {}),
       headline: fact.headline,
       entities: fact.entities,
       relations: fact.relations,
