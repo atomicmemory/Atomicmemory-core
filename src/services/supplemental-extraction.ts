@@ -8,6 +8,10 @@ import type { ExtractedFact } from './extraction.js';
 import { normalizeExtractedFacts } from './fact-normalization.js';
 import { quickExtractFacts } from './quick-extraction.js';
 import { containsRelativeTemporalPhrase } from './relative-temporal.js';
+import { extractAffectEvidenceFacts } from './affect-evidence-extraction.js';
+import { extractCompetitionEvidenceFacts } from './competition-evidence-extraction.js';
+import { extractSharedSchoolFacts } from './shared-school-extraction.js';
+import { extractVisualEvidenceFacts } from './visual-evidence-extraction.js';
 
 const LITERAL_DETAIL_PATTERN =
   /\b(?:necklace|book|books|song|songs|music|musicians|fan|painting|paintings|photo|poster|posters|library|store|decor|furniture|flooring|pet|pets|cat|cats|dog|dogs|guinea pig|turtle|turtles|snake|snakes|workshop|poetry reading|sign|slipper|bowl)\b/i;
@@ -16,13 +20,33 @@ const TEMPORAL_DETAIL_PATTERN =
   /\b(last year|last month|last week|last [a-z]+|today|tomorrow|first|second|before|after|deadline|deadlines|timeline|relative to|months later|weeks later|few days ago|for \d+ years?|for three years?|for two years?|for four years?|for five years?)\b/i;
 const EVENT_DETAIL_PATTERN =
   /\b(?:accepted|interview|internship|mentor(?:ed|ing)?|network(?:ing)?|social media|competition|investor(?:s)?|fashion editors|analytics tools|video presentation|website|collaborat(?:e|ion)|dance class|Shia Labeouf|trip|travel(?:ed|ling)?|retreat|phuket|doctor|doc|check-up|appointment|blog|car mods?|restor(?:e|ed|ing|ation))\b/i;
+const VISUAL_EVIDENCE_PATTERN = /\bshared image evidence\b/i;
+const AFFECT_INVENTORY_PATTERN =
+  /\b(?:all that bring(?:s)? .*happiness|bring(?:s)? .*joy|bring(?:s)? .*happiness|happiness in life)\b/i;
+const SHARED_SCHOOL_PATTERN =
+  /\b(?:attended|studied at|went to).*\b(?:elementary school|school|class).*\btogether\b/i;
+
+interface SupplementalFeatureSet {
+  temporal: boolean;
+  literal: boolean;
+  event: boolean;
+  visual: boolean;
+  affectInventory: boolean;
+  sharedSchool: boolean;
+}
 
 export function mergeSupplementalFacts(
   primaryFacts: ExtractedFact[],
   conversationText: string,
 ): ExtractedFact[] {
   const merged = [...primaryFacts];
-  const supplementalFacts = normalizeExtractedFacts(quickExtractFacts(conversationText));
+  const supplementalFacts = normalizeExtractedFacts([
+    ...quickExtractFacts(conversationText),
+    ...extractAffectEvidenceFacts(conversationText),
+    ...extractCompetitionEvidenceFacts(conversationText),
+    ...extractSharedSchoolFacts(conversationText),
+    ...extractVisualEvidenceFacts(conversationText),
+  ]);
 
   for (const fact of supplementalFacts) {
     const upgradeIndex = findUpgradeableFactIndex(merged, fact);
@@ -47,13 +71,9 @@ function shouldIncludeSupplementalFact(
     return false;
   }
 
-  const candidateEntities = listNonUserEntities(candidate);
   const candidateShape = buildCoverageShape(candidate);
-  const candidateAddsTemporalDetail = hasRelativeTemporalDetail(candidate.fact);
-  const candidateAddsLiteralDetail = hasLiteralDetail(candidate.fact);
-  const candidateAddsEventDetail = hasEventDetail(candidate.fact);
-
-  if (candidateEntities.length === 0 && !candidateAddsTemporalDetail && !candidateAddsLiteralDetail && !candidateAddsEventDetail) {
+  const candidateFeatures = buildFeatureSet(candidate.fact);
+  if (!hasSupplementalSignal(candidate, candidateFeatures)) {
     return false;
   }
 
@@ -65,20 +85,7 @@ function shouldIncludeSupplementalFact(
     return true;
   }
 
-  if (!candidateAddsTemporalDetail && !candidateAddsLiteralDetail && !candidateAddsEventDetail) {
-    return false;
-  }
-
-  if (candidateAddsTemporalDetail) {
-    return shapeMatches.every((fact) => !hasRelativeTemporalDetail(fact.fact));
-  }
-  if (candidateAddsLiteralDetail) {
-    return shapeMatches.every((fact) => !hasLiteralDetail(fact.fact));
-  }
-  if (candidateAddsEventDetail) {
-    return shapeMatches.every((fact) => !hasEventDetail(fact.fact));
-  }
-  return false;
+  return hasUncoveredFeature(shapeMatches, candidateFeatures);
 }
 
 function findUpgradeableFactIndex(
@@ -87,13 +94,11 @@ function findUpgradeableFactIndex(
 ): number {
   const candidateEntities = new Set(listNonUserEntities(candidate));
   const candidateRelations = new Set(candidate.relations.map((relation) => relation.type));
-  const candidateAddsTemporalDetail = hasRelativeTemporalDetail(candidate.fact);
-  const candidateAddsLiteralDetail = hasLiteralDetail(candidate.fact);
-  const candidateAddsEventDetail = hasEventDetail(candidate.fact);
+  const candidateFeatures = buildFeatureSet(candidate.fact);
 
   return existingFacts.findIndex((fact) => {
     const existingEntities = listNonUserEntities(fact);
-    if (existingEntities.length === 0 || candidateEntities.size <= existingEntities.length) {
+    if (existingEntities.length === 0) {
       return false;
     }
 
@@ -108,15 +113,54 @@ function findUpgradeableFactIndex(
       return false;
     }
 
+    if (candidateFeatures.sharedSchool && !hasSharedSchoolDetail(fact.fact)) {
+      return true;
+    }
+
+    if (candidateEntities.size <= existingEntities.length) {
+      return false;
+    }
+
     if (candidate.fact.length <= fact.fact.length + 10) {
       return false;
     }
 
-    return candidateAddsTemporalDetail
-      || candidateAddsLiteralDetail
-      || candidateAddsEventDetail
+    return hasAnyFeature(candidateFeatures)
       || !hasRelativeTemporalDetail(fact.fact);
   });
+}
+
+function buildFeatureSet(text: string): SupplementalFeatureSet {
+  return {
+    temporal: hasRelativeTemporalDetail(text),
+    literal: hasLiteralDetail(text),
+    event: hasEventDetail(text),
+    visual: hasVisualEvidenceDetail(text),
+    affectInventory: hasAffectInventoryDetail(text),
+    sharedSchool: hasSharedSchoolDetail(text),
+  };
+}
+
+function hasSupplementalSignal(candidate: ExtractedFact, features: SupplementalFeatureSet): boolean {
+  return listNonUserEntities(candidate).length > 0 || hasAnyFeature(features);
+}
+
+function hasAnyFeature(features: SupplementalFeatureSet): boolean {
+  return Object.values(features).some(Boolean);
+}
+
+function hasUncoveredFeature(
+  shapeMatches: ExtractedFact[],
+  features: SupplementalFeatureSet,
+): boolean {
+  if (features.visual) return true;
+  if (!hasAnyFeature(features)) return false;
+  if (features.sharedSchool) return shapeMatches.every((fact) => !hasSharedSchoolDetail(fact.fact));
+  if (features.affectInventory) return shapeMatches.every((fact) => !hasAffectInventoryDetail(fact.fact));
+  if (features.temporal) return shapeMatches.every((fact) => !hasRelativeTemporalDetail(fact.fact));
+  if (features.literal) return shapeMatches.every((fact) => !hasLiteralDetail(fact.fact));
+  if (features.event) return shapeMatches.every((fact) => !hasEventDetail(fact.fact));
+  return false;
 }
 
 function buildCoverageShape(fact: ExtractedFact): string {
@@ -143,6 +187,18 @@ function hasLiteralDetail(text: string): boolean {
 
 function hasEventDetail(text: string): boolean {
   return EVENT_DETAIL_PATTERN.test(text);
+}
+
+function hasVisualEvidenceDetail(text: string): boolean {
+  return VISUAL_EVIDENCE_PATTERN.test(text);
+}
+
+function hasAffectInventoryDetail(text: string): boolean {
+  return AFFECT_INVENTORY_PATTERN.test(text);
+}
+
+function hasSharedSchoolDetail(text: string): boolean {
+  return SHARED_SCHOOL_PATTERN.test(text);
 }
 
 function dedupeByNormalizedFact(facts: ExtractedFact[]): ExtractedFact[] {
