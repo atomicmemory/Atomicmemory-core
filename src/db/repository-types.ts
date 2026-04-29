@@ -49,6 +49,8 @@ export const RESERVED_METADATA_KEYS = new Set<string>([
   'clarification_note',
   'target_memory_id',
   'contradiction_confidence',
+  // Recency bin breadcrumb — `src/services/memory-storage.ts` (EXP-12)
+  'recency_bin',
 ]);
 
 /**

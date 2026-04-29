@@ -127,6 +127,8 @@ export interface RuntimeConfig {
   literalListProtectionMaxProtected: number;
   temporalQueryConstraintEnabled: boolean;
   temporalQueryConstraintBoost: number;
+  recencyBinBoostEnabled: boolean;
+  recencyBinBoostWeight: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -374,6 +376,8 @@ export const config: RuntimeConfig = {
   literalListProtectionMaxProtected: parsePositiveIntEnv('LITERAL_LIST_PROTECTION_MAX_PROTECTED', 3),
   temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
+  recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
+  recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -514,6 +518,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'literalListProtectionEnabled', 'literalListProtectionMaxProtected',
   // Temporal query selection
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
+  // Recency-bin boost (EXP-12)
+  'recencyBinBoostEnabled', 'recencyBinBoostWeight',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred

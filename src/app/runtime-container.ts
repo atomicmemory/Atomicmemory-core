@@ -104,6 +104,8 @@ export interface CoreRuntimeConfig {
   queryAugmentationMinSimilarity: number;
   queryExpansionEnabled: boolean;
   queryExpansionMinSimilarity: number;
+  recencyBinBoostEnabled: boolean;
+  recencyBinBoostWeight: number;
   repairConfidenceFloor: number;
   repairDeltaThreshold: number;
   repairLoopEnabled: boolean;
