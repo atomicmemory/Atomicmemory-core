@@ -140,6 +140,8 @@ export interface RuntimeConfig {
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  eventBoundaryExtractionEnabled: boolean;
+  eventBoundaryRetrievalBoost: number;
   retrievalConfidenceGateEnabled: boolean;
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
@@ -396,6 +398,8 @@ export const config: RuntimeConfig = {
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
   recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
+  eventBoundaryExtractionEnabled: (optionalEnv('EVENT_BOUNDARY_EXTRACTION_ENABLED') ?? 'false') === 'true',
+  eventBoundaryRetrievalBoost: parseFloat(optionalEnv('EVENT_BOUNDARY_RETRIEVAL_BOOST') ?? '0.4'),
   retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
   retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.05'),
   retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.5'),
@@ -545,6 +549,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
   'recencyBinBoostEnabled', 'recencyBinBoostWeight',
+  // Event boundary extraction (EXP-13)
+  'eventBoundaryExtractionEnabled', 'eventBoundaryRetrievalBoost',
   // Retrieval confidence gate (EXP-14)
   'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
   'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',

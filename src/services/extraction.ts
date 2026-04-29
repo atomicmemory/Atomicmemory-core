@@ -174,6 +174,17 @@ export interface ExtractedFact {
    * enforced by the `RESERVED_METADATA_KEYS` drift test.
    */
   metadata?: Record<string, unknown>;
+  /**
+   * EXP-13: whether this fact marks an event boundary — a turn where the
+   * topic, activity, or context shifts significantly. Set by the LLM when
+   * `eventBoundaryExtractionEnabled` is true.
+   */
+  eventBoundary?: boolean;
+  /**
+   * EXP-13: boundary strength in [0,1]. 0.0 = continuation, 1.0 = completely
+   * new topic. Only meaningful when `eventBoundary` is true.
+   */
+  boundaryStrength?: number;
 }
 
 export type AUDNAction = 'ADD' | 'UPDATE' | 'DELETE' | 'SUPERSEDE' | 'NOOP' | 'CLARIFY';
@@ -341,6 +352,8 @@ type RawExtractedFact = ExtractedFact & {
   headline?: string;
   entities?: ExtractedEntity[];
   relations?: ExtractedRelation[];
+  event_boundary?: unknown;
+  boundary_strength?: unknown;
 };
 
 /** Parse and validate LLM extraction response, returning raw facts or null on failure. */
@@ -402,7 +415,12 @@ function normalizeRawFact(m: RawExtractedFact | LeafFact): ExtractedFact {
   const importance = Number.isFinite(rawImportance) ? Math.max(0, Math.min(1, rawImportance)) : 0.5;
   const VALID_TYPES = new Set<ExtractedFact['type']>(['preference', 'project', 'knowledge', 'person', 'plan']);
   const rawType = typeof m.type === 'string' ? m.type.toLowerCase() : '';
-  return {
+
+  // EXP-13: parse event boundary fields
+  const eventBoundary = normalizeEventBoundary(m.event_boundary);
+  const boundaryStrength = normalizeBoundaryStrength(m.boundary_strength);
+
+  const result: ExtractedFact = {
     fact,
     importance,
     type: VALID_TYPES.has(rawType as ExtractedFact['type']) ? rawType as ExtractedFact['type'] : 'knowledge',
@@ -411,6 +429,32 @@ function normalizeRawFact(m: RawExtractedFact | LeafFact): ExtractedFact {
     entities: normalizeExtractedEntities(m.entities),
     relations: normalizeExtractedRelations(m.relations),
   };
+
+  if (eventBoundary !== undefined) {
+    result.eventBoundary = eventBoundary;
+  }
+  if (boundaryStrength !== undefined) {
+    result.boundaryStrength = boundaryStrength;
+  }
+
+  return result;
+}
+
+function normalizeEventBoundary(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.toLowerCase() === 'true';
+  return undefined;
+}
+
+function normalizeBoundaryStrength(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.min(1, value));
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.min(1, parsed));
+  }
+  return undefined;
 }
 
 /**
@@ -446,6 +490,8 @@ interface LeafFact {
   keywords: string[];
   entities: ExtractedEntity[];
   relations: ExtractedRelation[];
+  event_boundary?: unknown;
+  boundary_strength?: unknown;
 }
 
 function extractLeafFacts(obj: unknown, path: string[] = []): LeafFact[] {

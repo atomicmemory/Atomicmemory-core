@@ -24,6 +24,8 @@ export interface FactInput {
    * (key: `fact_role`). Reserved keys enforced by RESERVED_METADATA_KEYS.
    */
   metadata?: Record<string, unknown>;
+  eventBoundary?: boolean;
+  boundaryStrength?: number;
 }
 
 export interface ClaimTarget {
@@ -280,6 +282,7 @@ export interface IngestRuntimeConfig {
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
   genericEventAnchorEnabled: boolean;
+  eventBoundaryExtractionEnabled: boolean;
   entityGraphEnabled: boolean;
   entropyGateAlpha: number;
   entropyGateEnabled: boolean;

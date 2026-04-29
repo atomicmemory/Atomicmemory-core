@@ -117,6 +117,8 @@ export interface CoreRuntimeConfig {
   retrievalProfileSettings: RetrievalProfile;
   temporalQueryConstraintBoost: number;
   temporalQueryConstraintEnabled: boolean;
+  eventBoundaryExtractionEnabled: boolean;
+  eventBoundaryRetrievalBoost: number;
   retrievalConfidenceGateEnabled: boolean;
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;

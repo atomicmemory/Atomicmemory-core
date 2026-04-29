@@ -53,6 +53,9 @@ export const RESERVED_METADATA_KEYS = new Set<string>([
   'fact_role',
   // Recency bin breadcrumb — `src/services/memory-storage.ts` (EXP-12)
   'recency_bin',
+  // Event boundary — `src/services/memory-storage.ts` (EXP-13)
+  'event_boundary',
+  'boundary_strength',
 ]);
 
 /**

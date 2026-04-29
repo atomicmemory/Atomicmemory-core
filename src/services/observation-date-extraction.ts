@@ -21,26 +21,48 @@ export interface ExtractionOptions {
    * Defaults to off.
    */
   genericEventAnchorEnabled?: boolean;
+  /**
+   * EXP-13: piggyback on the extraction LLM call to also identify event
+   * boundaries — turns where the topic, activity, or context shifts
+   * significantly. Adds `event_boundary` and `boundary_strength` fields to
+   * each extracted fact. Defaults to off.
+   */
+  eventBoundaryExtractionEnabled?: boolean;
 }
 
 export function buildExtractionUserMessage(
   conversationText: string,
   options: ExtractionOptions = {},
 ): string {
-  if (!options.observationDateExtractionEnabled) {
-    return `Conversation to extract from:\n${conversationText}`;
+  const parts: string[] = [];
+
+  if (options.observationDateExtractionEnabled) {
+    const observationTimestamp = extractObservationTimestamp(conversationText);
+    if (observationTimestamp) {
+      parts.push(
+        `Observation timestamp: ${observationTimestamp}`,
+        'Use this timestamp to resolve relative dates in the conversation.',
+        'For relative phrases such as "last Friday", include the resolved absolute date in extracted facts when possible.',
+      );
+    }
   }
-  const observationTimestamp = extractObservationTimestamp(conversationText);
-  if (!observationTimestamp) {
-    return `Conversation to extract from:\n${conversationText}`;
+
+  if (options.eventBoundaryExtractionEnabled) {
+    parts.push(
+      'EVENT BOUNDARIES (IMPORTANT FOR ORDERING):',
+      'For each fact, also identify whether it sits at an event boundary — a turn where the topic, activity, or context shifts significantly relative to the surrounding conversation.',
+      '- event_boundary: true if this fact marks the start of a new episode/topic. false otherwise.',
+      '- boundary_strength: a number in [0, 1]. 0.0 = continuation. 1.0 = completely new topic. ~0.5 = related but distinct sub-topic.',
+      'Both fields default to false / 0 when uncertain. Boundaries are signals about ORDERING, not importance.',
+      'Add "event_boundary": <bool>, "boundary_strength": <number> to each entry in the memories array.',
+    );
   }
-  return [
-    `Observation timestamp: ${observationTimestamp}`,
-    'Use this timestamp to resolve relative dates in the conversation.',
-    'For relative phrases such as "last Friday", include the resolved absolute date in extracted facts when possible.',
-    '',
-    `Conversation to extract from:\n${conversationText}`,
-  ].join('\n');
+
+  if (parts.length > 0) {
+    parts.push('');
+  }
+  parts.push(`Conversation to extract from:\n${conversationText}`);
+  return parts.join('\n');
 }
 
 export function applyObservationDateAnchors(

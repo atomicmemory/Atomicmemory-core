@@ -54,11 +54,12 @@ describe('consensusExtractFacts runtime config', () => {
       observationDateExtractionEnabled: true,
       quotedEntityExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
 
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       'User: I commute 45 minutes.',
-      { observationDateExtractionEnabled: true, genericEventAnchorEnabled: false },
+      { observationDateExtractionEnabled: true, genericEventAnchorEnabled: false, eventBoundaryExtractionEnabled: false },
       { chunkSizeTurns: 8, chunkOverlapTurns: 2, extractionCacheEnabled: false },
     );
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
@@ -84,15 +85,17 @@ describe('consensusExtractFacts runtime config', () => {
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
 
     expect(mockCachedExtractFacts).toHaveBeenCalledWith(longConversation, {
       observationDateExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       longConversation,
-      { observationDateExtractionEnabled: false, genericEventAnchorEnabled: false },
+      { observationDateExtractionEnabled: false, genericEventAnchorEnabled: false, eventBoundaryExtractionEnabled: false },
       { chunkSizeTurns: 2, chunkOverlapTurns: 1, extractionCacheEnabled: true },
     );
   });
@@ -112,6 +115,7 @@ describe('consensusExtractFacts runtime config', () => {
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
 
     expect(mockChunkedExtractFacts).not.toHaveBeenCalled();
@@ -132,11 +136,13 @@ describe('consensusExtractFacts runtime config', () => {
       observationDateExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
 
     expect(mockExtractFacts).toHaveBeenCalledWith('User: I prefer Rust', {
       observationDateExtractionEnabled: false,
       genericEventAnchorEnabled: false,
+      eventBoundaryExtractionEnabled: false,
     });
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
   });

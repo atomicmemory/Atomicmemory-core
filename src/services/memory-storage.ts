@@ -113,6 +113,8 @@ export async function storeProjection(
   const recencyBin = assignRecencyBin(createdAt, ingestNow);
   const baseMetadata: Record<string, unknown> = { recency_bin: recencyBin };
   if (options.cmoId) baseMetadata.cmo_id = options.cmoId;
+  if (fact.eventBoundary === true) baseMetadata.event_boundary = true;
+  if (fact.boundaryStrength !== undefined) baseMetadata.boundary_strength = fact.boundaryStrength;
   const memoryId = await deps.stores.memory.storeMemory({
     userId, content: fact.fact, embedding,
     memoryType: fact.type === 'knowledge' ? 'semantic' : 'episodic',

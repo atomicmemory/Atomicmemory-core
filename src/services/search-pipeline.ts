@@ -38,6 +38,7 @@ import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
 import { applyRecencyBinBoost } from './recency-bin-ranking.js';
+import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 import { computeRetrievalConfidence, type RetrievalConfidence } from './retrieval-confidence-gate.js';
@@ -87,6 +88,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'repairLoopMinSimilarity'
   | 'recencyBinBoostEnabled'
   | 'recencyBinBoostWeight'
+  | 'eventBoundaryExtractionEnabled'
+  | 'eventBoundaryRetrievalBoost'
   | 'rerankSkipMinGap'
   | 'rerankSkipTopSimilarity'
   | 'retrievalProfileSettings'
@@ -789,6 +792,7 @@ function applyRankingProtectionStages(
     referenceTime,
     currentStateRanked.triggered,
   );
+  state = applyEventBoundaryStage(state, trace, policyConfig);
 
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
 }
@@ -834,6 +838,24 @@ function applyRecencyBinStage(
   trace.stage('recency-bin-boost', boost.results, {
     queryBin: boost.queryBin,
     weight: policyConfig.recencyBinBoostWeight,
+  });
+  return { ...state, candidates: boost.results };
+}
+
+function applyEventBoundaryStage(
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  if (!policyConfig.eventBoundaryExtractionEnabled) return state;
+  const boost = applyEventBoundaryBoost(state.candidates, {
+    eventBoundaryBoostEnabled: policyConfig.eventBoundaryExtractionEnabled,
+    eventBoundaryBoostWeight: policyConfig.eventBoundaryRetrievalBoost,
+  });
+  if (!boost.applied) return state;
+  trace.stage('event-boundary-boost', boost.results, {
+    boostedCount: boost.boostedCount,
+    weight: policyConfig.eventBoundaryRetrievalBoost,
   });
   return { ...state, candidates: boost.results };
 }

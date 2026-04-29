@@ -36,6 +36,7 @@ export interface ConsensusExtractionConfig {
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
   genericEventAnchorEnabled: boolean;
+  eventBoundaryExtractionEnabled: boolean;
 }
 
 interface FactWithEmbedding {
@@ -91,6 +92,7 @@ async function runMultipleExtractions(
     | 'consensusExtractionRuns'
     | 'observationDateExtractionEnabled'
     | 'genericEventAnchorEnabled'
+    | 'eventBoundaryExtractionEnabled'
   >,
 ): Promise<ExtractedFact[][]> {
   const allRunFacts: ExtractedFact[][] = [];
@@ -102,11 +104,12 @@ async function runMultipleExtractions(
 }
 
 function buildExtractionOptions(
-  config: Pick<ConsensusExtractionConfig, 'observationDateExtractionEnabled' | 'genericEventAnchorEnabled'>,
+  config: Pick<ConsensusExtractionConfig, 'observationDateExtractionEnabled' | 'genericEventAnchorEnabled' | 'eventBoundaryExtractionEnabled'>,
 ) {
   return {
     observationDateExtractionEnabled: config.observationDateExtractionEnabled,
     genericEventAnchorEnabled: config.genericEventAnchorEnabled,
+    eventBoundaryExtractionEnabled: config.eventBoundaryExtractionEnabled,
   };
 }
 
