@@ -125,6 +125,16 @@ export interface RuntimeConfig {
   rerankSkipMinGap: number;
   literalListProtectionEnabled: boolean;
   literalListProtectionMaxProtected: number;
+  /**
+   * EXP-05: when true, retrieval boosts memories tagged with
+   * `metadata.fact_role: 'instruction'` (set by extraction enrichment for
+   * imperative phrasing — "always X", "never Y", "from now on", etc.).
+   * Defaults-off per Sprint 2 rule. Tagging at ingest is unconditional;
+   * the boost itself is gated. See `src/services/instruction-boost.ts`.
+   */
+  instructionBoostEnabled: boolean;
+  /** EXP-05: additive score boost applied to instruction-tagged results. */
+  instructionBoostWeight: number;
   temporalQueryConstraintEnabled: boolean;
   temporalQueryConstraintBoost: number;
   deferredAudnEnabled: boolean;
@@ -372,6 +382,8 @@ export const config: RuntimeConfig = {
   rerankSkipMinGap: parseFloat(optionalEnv('RERANK_SKIP_MIN_GAP') ?? '0.05'),
   literalListProtectionEnabled: (optionalEnv('LITERAL_LIST_PROTECTION_ENABLED') ?? 'false') === 'true',
   literalListProtectionMaxProtected: parsePositiveIntEnv('LITERAL_LIST_PROTECTION_MAX_PROTECTED', 3),
+  instructionBoostEnabled: (optionalEnv('INSTRUCTION_BOOST_ENABLED') ?? 'false') === 'true',
+  instructionBoostWeight: parseFloat(optionalEnv('INSTRUCTION_BOOST_WEIGHT') ?? '0.15'),
   temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
@@ -512,6 +524,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'rerankSkipTopSimilarity', 'rerankSkipMinGap',
   // Literal/list answer selection
   'literalListProtectionEnabled', 'literalListProtectionMaxProtected',
+  // Instruction-type retrieval boost (EXP-05)
+  'instructionBoostEnabled', 'instructionBoostWeight',
   // Temporal query selection
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Fast AUDN

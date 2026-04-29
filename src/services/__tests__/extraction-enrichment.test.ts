@@ -3,7 +3,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { enrichExtractedFact } from '../extraction-enrichment.js';
+import {
+  detectInstructionFact,
+  enrichExtractedFact,
+} from '../extraction-enrichment.js';
 import type { ExtractedFact } from '../extraction.js';
 
 describe('enrichExtractedFact', () => {
@@ -76,3 +79,71 @@ function buildFact(factText: string, keywords: string[]): ExtractedFact {
     relations: [],
   };
 }
+
+describe('instruction tagging (EXP-05)', () => {
+  const INSTRUCTION_PHRASES = [
+    'Always respond in formal English.',
+    'Never share my email address.',
+    'From now on, summarize replies in three bullets.',
+    'Please remember that I prefer Celsius.',
+    'Make sure to cite sources for every claim.',
+    "Don't forget to greet me by name.",
+    'Every time I ask for code, include tests.',
+    'Whenever you mention prices, use USD.',
+    'Going forward, omit emoji from responses.',
+    'In the future, default to Python over JavaScript.',
+    'Remember to mention deployment caveats.',
+  ];
+
+  for (const phrase of INSTRUCTION_PHRASES) {
+    it(`detects an imperative marker in: "${phrase}"`, () => {
+      expect(detectInstructionFact(phrase)).toBe(true);
+    });
+  }
+
+  it('does not flag a regular factual statement as an instruction', () => {
+    expect(detectInstructionFact('User is building a personal finance tracker.')).toBe(false);
+    expect(detectInstructionFact('User favorite color is blue.')).toBe(false);
+  });
+
+  it('tags fact metadata with fact_role=instruction and floors importance', () => {
+    const fact = buildFact('Always respond to me in formal English.', []);
+
+    const enriched = enrichExtractedFact(fact);
+
+    expect(enriched.metadata).toMatchObject({ fact_role: 'instruction' });
+    expect(enriched.importance).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it('preserves importance above the floor when already higher', () => {
+    const fact = { ...buildFact('Never log my passwords.', []), importance: 0.99 };
+
+    const enriched = enrichExtractedFact(fact);
+
+    expect(enriched.importance).toBe(0.99);
+    expect(enriched.metadata?.fact_role).toBe('instruction');
+  });
+
+  it('does not add fact_role for non-imperative facts', () => {
+    const fact = buildFact('User is using Tailwind CSS for the finance tracker.', ['Tailwind CSS']);
+
+    const enriched = enrichExtractedFact(fact);
+
+    expect(enriched.metadata?.fact_role).toBeUndefined();
+    expect(enriched.importance).toBe(0.7);
+  });
+
+  it('merges with caller-supplied metadata without clobbering it', () => {
+    const fact: ExtractedFact = {
+      ...buildFact('Always send me weekly summaries.', []),
+      metadata: { custom_tag: 'value' },
+    };
+
+    const enriched = enrichExtractedFact(fact);
+
+    expect(enriched.metadata).toMatchObject({
+      custom_tag: 'value',
+      fact_role: 'instruction',
+    });
+  });
+});

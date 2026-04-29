@@ -29,6 +29,24 @@ interface StoreProjectionOptions {
   workspace?: import('../db/repository-types.js').WorkspaceContext;
 }
 
+/**
+ * Compose the persisted memory's `metadata` map by overlaying the optional
+ * fact-supplied metadata (from extraction enrichers, e.g. instruction
+ * tagging) and the lineage `cmo_id`. Returns `undefined` when neither is
+ * present so we don't write an empty map.
+ *
+ * `cmo_id` always wins on conflict — fact metadata cannot clobber lineage.
+ */
+function mergeStoreMetadata(
+  cmoId: string | undefined,
+  factMetadata: Record<string, unknown> | undefined,
+): import('../db/repository-types.js').MemoryMetadata | undefined {
+  if (!cmoId && (!factMetadata || Object.keys(factMetadata).length === 0)) return undefined;
+  const merged: Record<string, unknown> = { ...(factMetadata ?? {}) };
+  if (cmoId) merged.cmo_id = cmoId;
+  return merged as import('../db/repository-types.js').MemoryMetadata;
+}
+
 /** Store a new canonical fact: CMO, projection, claim, evidence, entities. */
 export async function storeCanonicalFact(
   deps: MemoryServiceDeps,
@@ -93,7 +111,7 @@ export async function storeProjection(
     userId, content: fact.fact, embedding,
     memoryType: fact.type === 'knowledge' ? 'semantic' : 'episodic',
     importance: fact.importance, sourceSite, sourceUrl, episodeId,
-    metadata: options.cmoId ? { cmo_id: options.cmoId } : undefined,
+    metadata: mergeStoreMetadata(options.cmoId, fact.metadata),
     keywords: fact.keywords.join(' '),
     namespace: namespace ?? undefined,
     summary: fact.headline,
