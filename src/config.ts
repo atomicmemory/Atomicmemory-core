@@ -159,6 +159,19 @@ export interface RuntimeConfig {
   costRunId: string;
   conflictAutoResolveMs: number;
   /**
+   * EXP-08: when true, ingest auto-triggers `executeConsolidation` once
+   * the per-user_id ingest turn count crosses a multiple of
+   * `scheduledConsolidationTurnInterval`. Defaults-off. Targets BEAM
+   * SUM ability. See `src/services/scheduled-consolidation.ts`.
+   */
+  scheduledConsolidationEnabled: boolean;
+  /**
+   * EXP-08: number of ingest turns per user_id between scheduled
+   * consolidation runs. Used only when `scheduledConsolidationEnabled`
+   * is true. Default 50.
+   */
+  scheduledConsolidationTurnInterval: number;
+  /**
    * Dev/test-only: when true, PUT /v1/memories/config mutates the runtime
    * singleton. Production deploys leave this unset (false) — the route
    * returns 410 Gone. Startup-validated; routes read the memoized value
@@ -414,6 +427,12 @@ export const config: RuntimeConfig = {
   costLogDir: optionalEnv('COST_LOG_DIR') ?? 'data/cost-logs',
   costRunId: optionalEnv('COST_RUN_ID') ?? '',
   conflictAutoResolveMs: parseInt(optionalEnv('CONFLICT_AUTO_RESOLVE_MS') ?? '86400000', 10),
+  scheduledConsolidationEnabled:
+    (optionalEnv('SCHEDULED_CONSOLIDATION_ENABLED') ?? 'false') === 'true',
+  scheduledConsolidationTurnInterval: parsePositiveIntEnv(
+    'SCHEDULED_CONSOLIDATION_TURN_INTERVAL',
+    50,
+  ),
   runtimeConfigMutationEnabled:
     (process.env.CORE_RUNTIME_CONFIG_MUTATION_ENABLED ?? 'false') === 'true',
 };
@@ -563,6 +582,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'compositeMaxClusterSize', 'compositeSimilarityThreshold',
   // Conflict handling
   'conflictAutoResolveMs',
+  // Scheduled consolidation (EXP-08)
+  'scheduledConsolidationEnabled', 'scheduledConsolidationTurnInterval',
 ] as const;
 
 export type SupportedRuntimeConfigField = typeof SUPPORTED_RUNTIME_CONFIG_FIELDS[number];

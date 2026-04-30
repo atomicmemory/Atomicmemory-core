@@ -292,6 +292,10 @@ export interface IngestRuntimeConfig {
   ingestTraceEnabled: boolean;
   lessonsEnabled: boolean;
   llmModel: string;
+  /** EXP-08: see RuntimeConfig.scheduledConsolidationEnabled. */
+  scheduledConsolidationEnabled: boolean;
+  /** EXP-08: see RuntimeConfig.scheduledConsolidationTurnInterval. */
+  scheduledConsolidationTurnInterval: number;
   trustScoringEnabled: boolean;
   trustScoreMinThreshold: number;
 }
