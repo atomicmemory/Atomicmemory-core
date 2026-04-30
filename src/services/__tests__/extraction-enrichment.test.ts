@@ -106,6 +106,46 @@ describe('instruction tagging (EXP-05)', () => {
     expect(detectInstructionFact('User favorite color is blue.')).toBe(false);
   });
 
+  // EXP-05 H-310 — BEAM soft-imperative additions.
+  // BEAM users phrase instructions softer than the original strict
+  // imperatives. These positive cases mirror the surface form that the
+  // extraction pipeline emits (third person "user prefers / wants / ...").
+  const BEAM_INSTRUCTION_PHRASES = [
+    'User prefers simple, minimal dependencies to keep the app lightweight.',
+    'User wants the dashboard API response time to stay under 250ms.',
+    'User would like all responses to include explicit version numbers.',
+    "I'd like the assistant to suggest only lightweight libraries.",
+    'Please respond in formal English when discussing security topics.',
+    'Assistant should always include unit tests in code examples.',
+    'Assistant should never log passwords or session tokens.',
+    'User preference is to use TypeScript over JavaScript for new files.',
+    'User has a preference for syntax-highlighted code snippets in discussions.',
+  ];
+
+  for (const phrase of BEAM_INSTRUCTION_PHRASES) {
+    it(`H-310: detects BEAM soft-imperative in: "${phrase}"`, () => {
+      expect(detectInstructionFact(phrase)).toBe(true);
+    });
+  }
+
+  // False-positive prevention: phrasings that LOOK directive but are
+  // actually questions or negations and must NOT be tagged.
+  const BEAM_FALSE_POSITIVE_PHRASES = [
+    // Question prefixes — "wants to know" is a query, not a standing rule.
+    'User wants to know how Flask sessions work.',
+    "I'd like to know which Python version is currently installed.",
+    'User would like to ask about the difference between SQLite and Postgres.',
+    // Negations — "prefers not to" is not a standing rule we should boost.
+    'User prefers not to use heavy frameworks for this project.',
+    'User does not prefer dark mode in the IDE.',
+  ];
+
+  for (const phrase of BEAM_FALSE_POSITIVE_PHRASES) {
+    it(`H-310: suppresses false positive: "${phrase}"`, () => {
+      expect(detectInstructionFact(phrase)).toBe(false);
+    });
+  }
+
   it('tags fact metadata with fact_role=instruction and floors importance', () => {
     const fact = buildFact('Always respond to me in formal English.', []);
 
