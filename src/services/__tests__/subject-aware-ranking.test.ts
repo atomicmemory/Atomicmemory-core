@@ -56,12 +56,12 @@ describe('applySubjectAwareRanking', () => {
 
   it('drops temporal filler anchors but keeps high-signal bigrams', () => {
     const anchors = extractSubjectQueryAnchors(
-      "How many months lapsed between Sam's first and second doctor's appointment?",
+      "How many months lapsed between Avery's first and second maintenance appointment?",
     );
 
-    expect(anchors).toContain('Sams');
+    expect(anchors).toContain('Averys');
     expect(anchors).toContain('appointment');
-    expect(anchors).toContain('doctor appointment');
+    expect(anchors).toContain('maintenance appointment');
     expect(anchors).not.toContain('many');
     expect(anchors).not.toContain('months');
     expect(anchors).not.toContain('between');
@@ -80,10 +80,10 @@ describe('applySubjectAwareRanking', () => {
 
   it('penalizes planning-like later memories for temporal event queries', () => {
     const ranked = applySubjectAwareRanking(
-      "How many months lapsed between Sam's first and second doctor's appointment?",
+      "How many months lapsed between Avery's first and second maintenance appointment?",
       [
-        buildResult('plan', 'Sam decided to make a new appointment in January.', 1.1),
-        buildResult('done', 'Sam had a second doctor appointment after changing diet.', 0.6),
+        buildResult('plan', 'Avery planned to schedule another maintenance appointment in January.', 1.1),
+        buildResult('done', 'Avery completed a second maintenance appointment.', 0.6),
       ],
     );
 

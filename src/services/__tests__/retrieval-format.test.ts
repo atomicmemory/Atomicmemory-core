@@ -247,9 +247,9 @@ describe('formatTieredInjection', () => {
 
   it('suppresses the generic timeline summary when query-aware temporal evidence is present', () => {
     const memories = [
-      makeResult({ id: 'first', content: "Sam had a doctor's appointment as a wake-up call.", created_at: new Date('2023-05-24T00:00:00Z') }),
-      makeResult({ id: 'second', content: 'Sam had another doctor appointment after changing diet.', created_at: new Date('2023-08-15T00:00:00Z') }),
-      makeResult({ id: 'plan', content: 'Sam decided to make a new appointment in January.', created_at: new Date('2024-01-10T00:00:00Z') }),
+      makeResult({ id: 'first', content: 'Avery completed the first maintenance appointment.', created_at: new Date('2023-05-24T00:00:00Z') }),
+      makeResult({ id: 'second', content: 'Avery completed a second maintenance appointment.', created_at: new Date('2023-08-15T00:00:00Z') }),
+      makeResult({ id: 'plan', content: 'Avery planned to schedule another maintenance appointment in January.', created_at: new Date('2024-01-10T00:00:00Z') }),
     ];
     const assignments = [
       { memoryId: 'first', tier: 'L2' as const, estimatedTokens: 5 },
@@ -259,7 +259,7 @@ describe('formatTieredInjection', () => {
     const result = formatTieredInjection(
       memories,
       assignments,
-      "How many months lapsed between Sam's first and second doctor's appointment?",
+      "How many months lapsed between Avery's first and second maintenance appointment?",
     );
 
     expect(result).toContain('Repeated event endpoints:');

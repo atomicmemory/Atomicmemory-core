@@ -14,14 +14,6 @@ import { extractSessionTimestamp, parseSessionDate } from './session-date.js';
 
 export interface ExtractionOptions {
   observationDateExtractionEnabled?: boolean;
-  /**
-   * When true, `mergeSupplementalFacts` runs the LoCoMo-tuned extractors
-   * (shared overlap, visual evidence, school co-attendance, competition,
-   * affect inventory) in addition to the always-on `quickExtractFacts`.
-   * Default false; production engine never runs the LoCoMo-shaped paths
-   * unless this option is explicitly true.
-   */
-  locomoTunedExtractionEnabled?: boolean;
 }
 
 export function buildExtractionUserMessage(

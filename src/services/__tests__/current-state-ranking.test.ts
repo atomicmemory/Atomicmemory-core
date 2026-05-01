@@ -73,10 +73,10 @@ describe('isCurrentStateQuery', () => {
 
   it('rejects temporal comparison quantity queries', () => {
     expect(isCurrentStateQuery(
-      "How many months lapsed between Sam's first and second doctor's appointment?",
+      "How many months lapsed between Avery's first and second maintenance appointment?",
     )).toBe(false);
     expect(isCurrentStateQuery(
-      'How long did James and Samantha date before deciding to move in together?',
+      'How long did Alex and Jordan collaborate before launching?',
     )).toBe(false);
   });
 

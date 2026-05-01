@@ -83,20 +83,6 @@ export interface RuntimeConfig {
   consensusExtractionRuns: number;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
-  /**
-   * Gate for the LoCoMo10 benchmark-tuned supplemental extractors
-   * (shared dessert/movie/car-work overlap, beach-walk-from-photo-tags,
-   * elementary-school co-attendance, dance-crew-competition phrasing,
-   * pet-affect lexicon). These rules were observed-fitted against
-   * specific LoCoMo failures and do not generalize. Default off in
-   * production. Set true for benchmark reproduction or via
-   * EVAL_CONFIG_OVERRIDE_JSON for per-run ablation.
-   *
-   * Only affects ingest extraction; search-side behavior is unchanged.
-   * `quickExtractFacts` continues to fire regardless of this flag —
-   * gating is internal to `mergeSupplementalFacts`.
-   */
-  locomoTunedExtractionEnabled: boolean;
   entropyGateEnabled: boolean;
   entropyGateThreshold: number;
   entropyGateAlpha: number;
@@ -344,7 +330,6 @@ export const config: RuntimeConfig = {
   consensusExtractionRuns: parseInt(optionalEnv('CONSENSUS_EXTRACTION_RUNS') ?? '3', 10),
   observationDateExtractionEnabled: (optionalEnv('OBSERVATION_DATE_EXTRACTION_ENABLED') ?? 'false') === 'true',
   quotedEntityExtractionEnabled: (optionalEnv('QUOTED_ENTITY_EXTRACTION_ENABLED') ?? 'false') === 'true',
-  locomoTunedExtractionEnabled: (optionalEnv('LOCOMO_TUNED_EXTRACTION_ENABLED') ?? 'false') === 'true',
   entropyGateEnabled: (optionalEnv('ENTROPY_GATE_ENABLED') ?? 'false') === 'true',
   entropyGateThreshold: parseFloat(optionalEnv('ENTROPY_GATE_THRESHOLD') ?? '0.35'),
   entropyGateAlpha: parseFloat(optionalEnv('ENTROPY_GATE_ALPHA') ?? '0.5'),
@@ -504,7 +489,6 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'chunkSizeTurns', 'chunkOverlapTurns',
   'consensusExtractionEnabled', 'consensusExtractionRuns',
   'observationDateExtractionEnabled', 'quotedEntityExtractionEnabled',
-  'locomoTunedExtractionEnabled',
   'entropyGateEnabled', 'entropyGateThreshold', 'entropyGateAlpha',
   // Affinity clustering
   'affinityClusteringThreshold', 'affinityClusteringMinSize',

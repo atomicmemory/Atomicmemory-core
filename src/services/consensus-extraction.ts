@@ -35,7 +35,6 @@ export interface ConsensusExtractionConfig {
   extractionCacheEnabled: boolean;
   observationDateExtractionEnabled: boolean;
   quotedEntityExtractionEnabled: boolean;
-  locomoTunedExtractionEnabled: boolean;
 }
 
 interface FactWithEmbedding {
@@ -87,7 +86,7 @@ function applyOptionalQuotedEntityExtraction(
 /** Run extractFacts() N times to get independent LLM samples. */
 async function runMultipleExtractions(
   conversationText: string,
-  config: Pick<ConsensusExtractionConfig, 'consensusExtractionRuns' | 'observationDateExtractionEnabled' | 'locomoTunedExtractionEnabled'>,
+  config: Pick<ConsensusExtractionConfig, 'consensusExtractionRuns' | 'observationDateExtractionEnabled'>,
 ): Promise<ExtractedFact[][]> {
   const allRunFacts: ExtractedFact[][] = [];
   const options = buildExtractionOptions(config);
@@ -98,11 +97,10 @@ async function runMultipleExtractions(
 }
 
 function buildExtractionOptions(
-  config: Pick<ConsensusExtractionConfig, 'observationDateExtractionEnabled' | 'locomoTunedExtractionEnabled'>,
+  config: Pick<ConsensusExtractionConfig, 'observationDateExtractionEnabled'>,
 ) {
   return {
     observationDateExtractionEnabled: config.observationDateExtractionEnabled,
-    locomoTunedExtractionEnabled: config.locomoTunedExtractionEnabled,
   };
 }
 

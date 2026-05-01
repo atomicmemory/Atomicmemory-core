@@ -23,10 +23,8 @@ import type { RetrievalMode } from './memory-service-types.js';
 import { escapeXml } from '../xml-escape.js';
 import { spansMultipleDates, buildTimelinePack, formatTimelinePack } from './timeline-pack.js';
 import { buildTemporalEvidenceBlock } from './temporal-endpoint-evidence.js';
-import { buildSharedOverlapEvidenceBlock } from './shared-overlap-evidence.js';
-import { buildAnswerDetailEvidenceBlock } from './answer-detail-evidence.js';
 import { preserveQueryTermVisibility, sumAssignmentTokens } from './query-term-visibility.js';
-import { appendTimelineSummary } from './timeline-summary.js';
+import { formatDateLabel, formatDuration } from './temporal-format.js';
 
 /**
  * Packaging observability signal — records whether and how packaging
@@ -159,7 +157,80 @@ function formatSubjectSection(ns: string, groupMemories: SearchResult[]): string
 
 /** Join sections and append temporal summary if present. */
 function appendTemporalSummary(sections: string[], memories: SearchResult[]): string {
-  return appendTimelineSummary(sections, sortChronologically(memories));
+  const sortedAll = sortChronologically(memories);
+  const timeline = buildTemporalSummary(sortedAll);
+  const mainContent = sections.join('\n\n');
+  return timeline ? `${mainContent}\n\n${timeline}` : mainContent;
+}
+
+/**
+ * Build a timeline summary with computed time gaps between distinct dates.
+ * Helps weak LLMs answer temporal questions without doing date arithmetic.
+ */
+function buildTemporalSummary(sortedMemories: SearchResult[]): string {
+  const uniqueDates = getUniqueDates(sortedMemories);
+  if (uniqueDates.length < 2) return '';
+
+  const gaps: string[] = [];
+  for (let i = 1; i < uniqueDates.length; i++) {
+    const prev = uniqueDates[i - 1];
+    const curr = uniqueDates[i];
+    const diffMs = curr.getTime() - prev.getTime();
+    const diffDays = Math.round(diffMs / 86400000);
+    if (diffDays === 0) continue;
+    const duration = formatDuration(diffDays);
+    gaps.push(`- ${formatDateLabel(prev)} → ${formatDateLabel(curr)}: ${duration}`);
+  }
+
+  if (gaps.length === 0) return '';
+
+  const first = uniqueDates[0];
+  const last = uniqueDates[uniqueDates.length - 1];
+  const totalDays = Math.round((last.getTime() - first.getTime()) / 86400000);
+  const totalLine = `Total span: ${formatDateLabel(first)} to ${formatDateLabel(last)} (${formatDuration(totalDays)})`;
+  const evidenceLines = buildTemporalEvidenceLines(sortedMemories, uniqueDates);
+  const evidenceBlock = evidenceLines.length > 0
+    ? `\nKey temporal evidence:\n${evidenceLines.join('\n')}`
+    : '';
+
+  return `Timeline:\n${gaps.join('\n')}\n${totalLine}${evidenceBlock}`;
+}
+
+function getUniqueDates(memories: SearchResult[]): Date[] {
+  const seen = new Set<string>();
+  const dates: Date[] = [];
+  for (const m of memories) {
+    const key = m.created_at.toISOString().slice(0, 10);
+    if (!seen.has(key)) {
+      seen.add(key);
+      dates.push(m.created_at);
+    }
+  }
+  return dates;
+}
+
+function buildTemporalEvidenceLines(
+  memories: SearchResult[],
+  dates: Date[],
+): string[] {
+  return dates
+    .slice(0, 4)
+    .map((date) => buildTemporalEvidenceLine(memories, date))
+    .filter((line): line is string => line !== null);
+}
+
+function buildTemporalEvidenceLine(memories: SearchResult[], date: Date): string | null {
+  const key = formatDateLabel(date);
+  const sameDate = memories.filter((memory) => formatDateLabel(memory.created_at) === key);
+  const selected = sameDate.find((memory) => isAnswerBearing(memory.content)) ?? sameDate[0];
+  if (!selected) return null;
+  return `- ${key}: ${truncateTemporalEvidence(selected.content)}`;
+}
+
+function truncateTemporalEvidence(content: string): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 180) return normalized;
+  return `${normalized.slice(0, 177)}...`;
 }
 
 export function formatInjection(
@@ -247,9 +318,9 @@ export function formatTieredInjection(
   const sections = expandableIds
     ? [lines.join('\n'), `Expandable IDs: ${expandableIds}`]
     : [lines.join('\n')];
-  const evidenceBlocks = buildQueryEvidenceBlocks(sorted, query);
-  if (evidenceBlocks.length > 0) {
-    return [...sections, ...evidenceBlocks].join('\n\n');
+  const temporalEvidenceBlock = buildTemporalEvidenceBlock(sorted, query);
+  if (temporalEvidenceBlock) {
+    return [...sections, temporalEvidenceBlock].join('\n\n');
   }
   return appendTemporalSummary(sections, memories);
 }
@@ -295,19 +366,22 @@ export function buildInjection(
   }
 
   if (mode === 'flat') {
-    return { injectionText: appendQueryEvidence(formatSimpleInjection(memories), memories, query) };
+    return { injectionText: formatSimpleInjection(memories) };
   }
 
   const deduplicated = deduplicateCompositeMembersHard(memories);
   const budget = tokenBudget ?? DEFAULT_INJECTION_TOKEN_BUDGET;
   const forceRichTopHit = prefersAbstractAwareRetrieval(mode, query);
 
-  // Compute query-aware evidence blocks before tier assignment so their token
-  // cost is subtracted from the assignment budget. Otherwise appended blocks
-  // silently exceed the caller's budget and estimatedContextTokens is stale.
+  // Compute the temporal evidence block before tier assignment so
+  // its token cost is subtracted from the assignment budget. Otherwise the
+  // appended block silently exceeds the caller's budget and is missing
+  // from estimatedContextTokens. The block is appended inside
+  // formatTieredInjection; we just account for its tokens up front.
   const sortedForEndpoints = sortChronologically(deduplicated);
-  const evidenceTokens = estimateQueryEvidenceTokens(sortedForEndpoints, query);
-  const assignmentBudget = Math.max(0, budget - evidenceTokens);
+  const endpointBlock = buildTemporalEvidenceBlock(sortedForEndpoints, query);
+  const endpointTokens = endpointBlock ? estimateTokens(endpointBlock) : 0;
+  const assignmentBudget = Math.max(0, budget - endpointTokens);
 
   const result = assignTierBudgets(deduplicated, assignmentBudget, { forceRichTopHit });
   const assignments = preserveQueryTermVisibility(deduplicated, result.assignments, query, assignmentBudget);
@@ -319,31 +393,6 @@ export function buildInjection(
     injectionText: formatTieredInjection(deduplicated, assignments, query),
     tierAssignments: assignments,
     expandIds: expandIds.length > 0 ? expandIds : undefined,
-    estimatedContextTokens: sumAssignmentTokens(assignments) + evidenceTokens,
+    estimatedContextTokens: sumAssignmentTokens(assignments) + endpointTokens,
   };
-}
-
-function appendQueryEvidence(
-  injectionText: string,
-  memories: SearchResult[],
-  query: string,
-): string {
-  const blocks = buildQueryEvidenceBlocks(sortChronologically(memories), query);
-  if (blocks.length === 0) return injectionText;
-  return [injectionText, ...blocks].join('\n\n');
-}
-
-function buildQueryEvidenceBlocks(memories: SearchResult[], query: string): string[] {
-  return [
-    buildSharedOverlapEvidenceBlock(memories, query),
-    buildAnswerDetailEvidenceBlock(memories, query),
-    buildTemporalEvidenceBlock(memories, query),
-  ].filter((block) => block.length > 0);
-}
-
-function estimateQueryEvidenceTokens(memories: SearchResult[], query: string): number {
-  return buildQueryEvidenceBlocks(memories, query).reduce(
-    (total, block) => total + estimateTokens(block),
-    0,
-  );
 }

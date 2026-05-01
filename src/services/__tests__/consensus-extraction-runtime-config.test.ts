@@ -52,13 +52,12 @@ describe('consensusExtractFacts runtime config', () => {
       consensusExtractionRuns: 1,
       extractionCacheEnabled: false,
       observationDateExtractionEnabled: true,
-      locomoTunedExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
     });
 
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       'User: I commute 45 minutes.',
-      { observationDateExtractionEnabled: true, locomoTunedExtractionEnabled: false },
+      { observationDateExtractionEnabled: true },
       { chunkSizeTurns: 8, chunkOverlapTurns: 2, extractionCacheEnabled: false },
     );
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
@@ -82,17 +81,15 @@ describe('consensusExtractFacts runtime config', () => {
       consensusExtractionRuns: 1,
       extractionCacheEnabled: true,
       observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
     });
 
     expect(mockCachedExtractFacts).toHaveBeenCalledWith(longConversation, {
       observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
     });
     expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
       longConversation,
-      { observationDateExtractionEnabled: false, locomoTunedExtractionEnabled: false },
+      { observationDateExtractionEnabled: false },
       { chunkSizeTurns: 2, chunkOverlapTurns: 1, extractionCacheEnabled: true },
     );
   });
@@ -110,7 +107,6 @@ describe('consensusExtractFacts runtime config', () => {
       consensusExtractionRuns: 1,
       extractionCacheEnabled: true,
       observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
     });
 
@@ -130,82 +126,12 @@ describe('consensusExtractFacts runtime config', () => {
       consensusExtractionRuns: 1,
       extractionCacheEnabled: false,
       observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
       quotedEntityExtractionEnabled: false,
     });
 
     expect(mockExtractFacts).toHaveBeenCalledWith('User: I prefer Rust', {
       observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
     });
     expect(mockCachedExtractFacts).not.toHaveBeenCalled();
-  });
-
-  it('threads locomoTunedExtractionEnabled into extractFacts options', async () => {
-    mockExtractFacts.mockResolvedValue([]);
-
-    await consensusExtractFacts('User: tasty desserts', {
-      chunkedExtractionEnabled: false,
-      chunkedExtractionFallbackEnabled: false,
-      chunkSizeTurns: 8,
-      chunkOverlapTurns: 2,
-      consensusExtractionEnabled: false,
-      consensusExtractionRuns: 1,
-      extractionCacheEnabled: false,
-      observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: true,
-      quotedEntityExtractionEnabled: false,
-    });
-
-    expect(mockExtractFacts).toHaveBeenCalledWith('User: tasty desserts', {
-      observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: true,
-    });
-  });
-
-  it('threads locomoTunedExtractionEnabled=false into chunkedExtractFacts options', async () => {
-    mockChunkedExtractFacts.mockResolvedValue([]);
-
-    await consensusExtractFacts('User: a long conversation', {
-      chunkedExtractionEnabled: true,
-      chunkedExtractionFallbackEnabled: false,
-      chunkSizeTurns: 8,
-      chunkOverlapTurns: 2,
-      consensusExtractionEnabled: false,
-      consensusExtractionRuns: 1,
-      extractionCacheEnabled: false,
-      observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: false,
-      quotedEntityExtractionEnabled: false,
-    });
-
-    expect(mockChunkedExtractFacts).toHaveBeenCalledWith(
-      'User: a long conversation',
-      { observationDateExtractionEnabled: false, locomoTunedExtractionEnabled: false },
-      expect.any(Object),
-    );
-  });
-
-  it('threads locomoTunedExtractionEnabled=true into cachedExtractFacts options', async () => {
-    mockCachedExtractFacts.mockResolvedValue([]);
-
-    await consensusExtractFacts('User: tasty desserts cached', {
-      chunkedExtractionEnabled: false,
-      chunkedExtractionFallbackEnabled: false,
-      chunkSizeTurns: 8,
-      chunkOverlapTurns: 2,
-      consensusExtractionEnabled: false,
-      consensusExtractionRuns: 1,
-      extractionCacheEnabled: true,
-      observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: true,
-      quotedEntityExtractionEnabled: false,
-    });
-
-    expect(mockCachedExtractFacts).toHaveBeenCalledWith('User: tasty desserts cached', {
-      observationDateExtractionEnabled: false,
-      locomoTunedExtractionEnabled: true,
-    });
-    expect(mockExtractFacts).not.toHaveBeenCalled();
   });
 });
