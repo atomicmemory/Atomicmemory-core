@@ -123,6 +123,8 @@ export interface CoreRuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  /** EXP-SUM: see RuntimeConfig.summaryDownweightFactor. */
+  summaryDownweightFactor: number;
 }
 
 /** Repositories constructed by the runtime container. */
