@@ -108,6 +108,8 @@ export interface CoreRuntimeConfig {
   queryExpansionMinSimilarity: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  predictionErrorEnabled: boolean;
+  predictionErrorBoostWeight: number;
   repairConfidenceFloor: number;
   repairDeltaThreshold: number;
   repairLoopEnabled: boolean;
