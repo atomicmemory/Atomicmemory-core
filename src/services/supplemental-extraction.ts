@@ -40,18 +40,35 @@ interface SupplementalFeatureSet {
   sharedOverlap: boolean;
 }
 
+export interface SupplementalExtractionOptions {
+  /**
+   * Gate for the narrow LoCoMo-tuned extractors (affect inventory,
+   * dance-crew competition phrasing, elementary-school co-attendance,
+   * shared dessert/movie/car-work overlap, beach-walk-from-photo-tags,
+   * sunset-painting subject). These rules were observed-fitted against
+   * specific LoCoMo10 failures and do not generalize. When false,
+   * `mergeSupplementalFacts` only runs `quickExtractFacts`, which is
+   * the pre-existing production behavior on `origin/main`.
+   */
+  locomoTunedExtractionEnabled: boolean;
+}
+
 export function mergeSupplementalFacts(
   primaryFacts: ExtractedFact[],
   conversationText: string,
+  options: SupplementalExtractionOptions,
 ): ExtractedFact[] {
   const merged = [...primaryFacts];
   const supplementalFacts = normalizeExtractedFacts([
+    // quickExtractFacts is the pre-existing production-shipped supplemental
+    // path and stays unconditional. Only the LoCoMo-tuned extractors below
+    // are gated by the new flag.
     ...quickExtractFacts(conversationText),
-    ...extractAffectEvidenceFacts(conversationText),
-    ...extractCompetitionEvidenceFacts(conversationText),
-    ...extractSharedSchoolFacts(conversationText),
-    ...extractSharedOverlapFacts(conversationText),
-    ...extractVisualEvidenceFacts(conversationText),
+    ...(options.locomoTunedExtractionEnabled ? extractAffectEvidenceFacts(conversationText) : []),
+    ...(options.locomoTunedExtractionEnabled ? extractCompetitionEvidenceFacts(conversationText) : []),
+    ...(options.locomoTunedExtractionEnabled ? extractSharedSchoolFacts(conversationText) : []),
+    ...(options.locomoTunedExtractionEnabled ? extractSharedOverlapFacts(conversationText) : []),
+    ...(options.locomoTunedExtractionEnabled ? extractVisualEvidenceFacts(conversationText) : []),
   ]);
 
   for (const fact of supplementalFacts) {

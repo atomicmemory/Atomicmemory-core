@@ -321,7 +321,9 @@ export async function extractFacts(
     const normalized: ExtractedFact[] = rawFacts.map((m) => normalizeRawFact(m));
     const anchoredFacts = applyObservationDateAnchors(normalized, conversationText, options);
     const baseFacts = enrichExtractedFacts(normalizeExtractedFacts(anchoredFacts));
-    return mergeSupplementalFacts(baseFacts, conversationText);
+    return mergeSupplementalFacts(baseFacts, conversationText, {
+      locomoTunedExtractionEnabled: options.locomoTunedExtractionEnabled ?? false,
+    });
   });
 }
 
