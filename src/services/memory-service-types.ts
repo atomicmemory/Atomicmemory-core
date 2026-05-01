@@ -294,4 +294,8 @@ export interface IngestRuntimeConfig {
   llmModel: string;
   trustScoringEnabled: boolean;
   trustScoreMinThreshold: number;
+  /** EXP-SUM: see RuntimeConfig.summarySynthesisEnabled. */
+  summarySynthesisEnabled: boolean;
+  /** EXP-SUM: see RuntimeConfig.summarySynthesisTurnInterval. */
+  summarySynthesisTurnInterval: number;
 }
