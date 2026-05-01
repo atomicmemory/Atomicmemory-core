@@ -37,6 +37,7 @@ import { applyIterativeRetrieval } from './iterative-retrieval.js';
 import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
+import { applyInstructionPreferenceRetrieval } from './instruction-preference-retrieval.js';
 import { applyRecencyBinBoost } from './recency-bin-ranking.js';
 import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
@@ -65,6 +66,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'hybridSearchEnabled'
   | 'instructionBoostEnabled'
   | 'instructionBoostWeight'
+  | 'instructionPreferenceRetrievalEnabled'
+  | 'instructionPreferenceTopK'
   | 'iterativeRetrievalEnabled'
   | 'linkExpansionBeforeMMR'
   | 'linkExpansionEnabled'
@@ -191,9 +194,38 @@ export async function runSearchPipelineWithTrace(
     },
   });
 
+  // Instruction-preference two-stage retrieval (EXP-IF). When the query is
+  // instruction-style and the flag is on, oversample, surface the top
+  // instruction-tagged subset, and merge those ahead of the general results.
+  const withInstructionPreference = await timed('search.instruction-preference', async () => {
+    const outcome = await applyInstructionPreferenceRetrieval(
+      {
+        search: stores.search,
+        userId,
+        query,
+        queryEmbedding,
+        initialResults: seededResults,
+        candidateDepth,
+        sourceSite,
+        referenceTime,
+      },
+      {
+        instructionPreferenceRetrievalEnabled: policyConfig.instructionPreferenceRetrievalEnabled,
+        instructionPreferenceTopK: policyConfig.instructionPreferenceTopK,
+      },
+    );
+    if (outcome.applied) {
+      trace.stage('instruction-preference-retrieval', outcome.results, {
+        instructionCount: outcome.instructionCount,
+        topK: policyConfig.instructionPreferenceTopK,
+      });
+    }
+    return outcome.results;
+  });
+
   // Entity name co-retrieval
   const withCoRetrieval = await timed('search.co-retrieval', () => applyEntityNameCoRetrieval(
-    stores, userId, query, queryEmbedding, seededResults, candidateDepth, trace, policyConfig,
+    stores, userId, query, queryEmbedding, withInstructionPreference, candidateDepth, trace, policyConfig,
   ));
 
   const withSubjectExpansion = await timed('search.subject-query-expansion', () => applySubjectQueryExpansion(

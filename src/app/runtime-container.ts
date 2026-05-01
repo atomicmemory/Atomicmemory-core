@@ -86,6 +86,8 @@ export interface CoreRuntimeConfig {
   hybridSearchEnabled: boolean;
   instructionBoostEnabled: boolean;
   instructionBoostWeight: number;
+  instructionPreferenceRetrievalEnabled: boolean;
+  instructionPreferenceTopK: number;
   iterativeRetrievalEnabled: boolean;
   lessonsEnabled: boolean;
   linkExpansionBeforeMMR: boolean;
