@@ -38,6 +38,7 @@ import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
 import { applyRecencyBinBoost } from './recency-bin-ranking.js';
+import { applyPredictionErrorBoost } from './prediction-error-boost.js';
 import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
@@ -88,6 +89,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'repairLoopMinSimilarity'
   | 'recencyBinBoostEnabled'
   | 'recencyBinBoostWeight'
+  | 'predictionErrorEnabled'
+  | 'predictionErrorBoostWeight'
   | 'eventBoundaryExtractionEnabled'
   | 'eventBoundaryRetrievalBoost'
   | 'rerankSkipMinGap'
@@ -793,6 +796,7 @@ function applyRankingProtectionStages(
     currentStateRanked.triggered,
   );
   state = applyEventBoundaryStage(state, trace, policyConfig);
+  state = applyPredictionErrorStage(query, state, trace, policyConfig);
 
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
 }
@@ -856,6 +860,35 @@ function applyEventBoundaryStage(
   trace.stage('event-boundary-boost', boost.results, {
     boostedCount: boost.boostedCount,
     weight: policyConfig.eventBoundaryRetrievalBoost,
+  });
+  return { ...state, candidates: boost.results };
+}
+
+/**
+ * Wraps `applyPredictionErrorBoost` with trace emission. No-op when the
+ * feature flag is off, the weight is non-positive, the query lacks a
+ * transition keyword, or no candidate carries a stored
+ * `prediction_error_score`. EXP-15.
+ */
+function applyPredictionErrorStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  if (!policyConfig.predictionErrorEnabled) return state;
+  const boost = applyPredictionErrorBoost({
+    query,
+    candidates: state.candidates,
+    config: {
+      predictionErrorEnabled: policyConfig.predictionErrorEnabled,
+      predictionErrorBoostWeight: policyConfig.predictionErrorBoostWeight,
+    },
+  });
+  if (!boost.applied) return state;
+  trace.stage('prediction-error-boost', boost.results, {
+    boostedCount: boost.boostedCount,
+    weight: policyConfig.predictionErrorBoostWeight,
   });
   return { ...state, candidates: boost.results };
 }

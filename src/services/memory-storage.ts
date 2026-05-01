@@ -16,6 +16,8 @@ import { emitAuditEvent } from './audit-events.js';
 import { derivePersistedClaimSlot } from './memory-crud.js';
 import { emitLineageEvent } from './memory-lineage.js';
 import { assignRecencyBin } from './temporal-fingerprint.js';
+import { computePredictionErrorScore } from './prediction-error-scoring.js';
+import type { AUDNAction } from './extraction.js';
 import type {
   AudnFactContext,
   ClaimTarget,
@@ -28,6 +30,16 @@ interface StoreProjectionOptions {
   cmoId?: string;
   logicalTimestamp?: Date;
   workspace?: import('../db/repository-types.js').WorkspaceContext;
+  /**
+   * EXP-15: AUDN action and neighborhood similarity used to compute
+   * `metadata.prediction_error_score`. Absent on legacy callers and on
+   * paths where no AUDN ran — the storage layer falls back to an
+   * empty-neighborhood ADD signal (score = 1) when the flag is on but
+   * inputs are absent, which is conservative for direct-store paths
+   * with zero candidates.
+   */
+  audnAction?: AUDNAction;
+  topKSimilarity?: number;
 }
 
 /**
@@ -69,6 +81,8 @@ export async function storeCanonicalFact(
         cmoId,
         logicalTimestamp,
         workspace,
+        audnAction: ctx.audnAction,
+        topKSimilarity: ctx.topKSimilarity,
       }),
   });
   if (!lineage?.memoryId) return { outcome: 'skipped', memoryId: null };
@@ -115,6 +129,14 @@ export async function storeProjection(
   if (options.cmoId) baseMetadata.cmo_id = options.cmoId;
   if (fact.eventBoundary === true) baseMetadata.event_boundary = true;
   if (fact.boundaryStrength !== undefined) baseMetadata.boundary_strength = fact.boundaryStrength;
+  if (deps.config.predictionErrorEnabled) {
+    const audnAction: AUDNAction = options.audnAction ?? 'ADD';
+    const similarity = typeof options.topKSimilarity === 'number' ? options.topKSimilarity : 0;
+    baseMetadata.prediction_error_score = computePredictionErrorScore({
+      audnAction,
+      existingMemoryHits: similarity > 0 ? [{ similarity }] : [],
+    });
+  }
   const memoryId = await deps.stores.memory.storeMemory({
     userId, content: fact.fact, embedding,
     memoryType: fact.type === 'knowledge' ? 'semantic' : 'episodic',

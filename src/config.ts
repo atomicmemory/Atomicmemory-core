@@ -140,6 +140,16 @@ export interface RuntimeConfig {
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  /**
+   * EXP-15: Prediction-error unified signal.
+   * When true, ingest stamps `metadata.prediction_error_score` (0..1) on
+   * stored memories based on AUDN action and top-K cosine similarity, and
+   * retrieval boosts high-error facts on contradiction/transition queries
+   * ("actually", "now", "instead", "anymore", etc.). Defaults-off.
+   */
+  predictionErrorEnabled: boolean;
+  /** EXP-15: additive score boost applied to high-prediction-error results. */
+  predictionErrorBoostWeight: number;
   eventBoundaryExtractionEnabled: boolean;
   eventBoundaryRetrievalBoost: number;
   retrievalConfidenceGateEnabled: boolean;
@@ -398,6 +408,8 @@ export const config: RuntimeConfig = {
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
   recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
+  predictionErrorEnabled: (optionalEnv('PREDICTION_ERROR_ENABLED') ?? 'false') === 'true',
+  predictionErrorBoostWeight: parseFloat(optionalEnv('PREDICTION_ERROR_BOOST_WEIGHT') ?? '0.10'),
   eventBoundaryExtractionEnabled: (optionalEnv('EVENT_BOUNDARY_EXTRACTION_ENABLED') ?? 'false') === 'true',
   eventBoundaryRetrievalBoost: parseFloat(optionalEnv('EVENT_BOUNDARY_RETRIEVAL_BOOST') ?? '0.4'),
   retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
@@ -549,6 +561,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
   'recencyBinBoostEnabled', 'recencyBinBoostWeight',
+  // Prediction-error unified signal (EXP-15)
+  'predictionErrorEnabled', 'predictionErrorBoostWeight',
   // Event boundary extraction (EXP-13)
   'eventBoundaryExtractionEnabled', 'eventBoundaryRetrievalBoost',
   // Retrieval confidence gate (EXP-14)

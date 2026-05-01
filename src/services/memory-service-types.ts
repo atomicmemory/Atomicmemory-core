@@ -154,6 +154,20 @@ export interface AudnFactContext {
   logicalTimestamp?: Date;
   /** Phase 5 Step 10: workspace scope for workspace-originated facts. */
   workspace?: import('../db/repository-types.js').WorkspaceContext;
+  /**
+   * EXP-15: AUDN action that drove this storage event. Populated by the
+   * AUDN executor before calling storeCanonicalFact / storeProjection so
+   * the storage layer can stamp `metadata.prediction_error_score`. Absent
+   * on direct-store paths (no AUDN ran), in which case the score defaults
+   * to a "fully novel" ADD signal driven solely by neighborhood similarity.
+   */
+  audnAction?: AUDNAction;
+  /**
+   * EXP-15: maximum cosine similarity over the candidates AUDN considered.
+   * Drives the surprise term in the prediction-error score. Absent when
+   * no candidates were considered (empty neighborhood), interpreted as 0.
+   */
+  topKSimilarity?: number;
 }
 
 export interface IngestResult {

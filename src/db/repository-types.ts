@@ -56,6 +56,8 @@ export const RESERVED_METADATA_KEYS = new Set<string>([
   // Event boundary — `src/services/memory-storage.ts` (EXP-13)
   'event_boundary',
   'boundary_strength',
+  // Prediction-error unified signal — `src/services/memory-storage.ts` (EXP-15)
+  'prediction_error_score',
 ]);
 
 /**

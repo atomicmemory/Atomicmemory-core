@@ -77,15 +77,21 @@ export async function resolveAndExecuteAudn(
   traceContext?: AudnTraceContext,
 ): Promise<FactResult> {
   const candidateIds = new Set(filteredCandidates.map((c) => c.id));
-  const ctx: AudnFactContext = { userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore, claimSlot, logicalTimestamp, workspace };
+  const topKSimilarity = filteredCandidates.reduce(
+    (max, c) => (c.similarity > max ? c.similarity : max),
+    0,
+  );
+  const ctx: AudnFactContext = { userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore, claimSlot, logicalTimestamp, workspace, topKSimilarity };
 
   const fastDecision = tryFastAUDN(fact.fact, filteredCandidates, deps.config);
   if (fastDecision) {
-    return executeAndTrackSupersede(deps, fastDecision, candidateIds, ctx, supersededTargets, requireTraceContext(traceContext), 'fast-audn', 'NOOP', fastDecision.action);
+    const fastCtx: AudnFactContext = { ...ctx, audnAction: fastDecision.action };
+    return executeAndTrackSupersede(deps, fastDecision, candidateIds, fastCtx, supersededTargets, requireTraceContext(traceContext), 'fast-audn', 'NOOP', fastDecision.action);
   }
 
   if (shouldDeferAudn(false, filteredCandidates.length)) {
-    const result = await storeCanonicalFact(deps, ctx);
+    const deferredCtx: AudnFactContext = { ...ctx, audnAction: 'ADD' };
+    const result = await storeCanonicalFact(deps, deferredCtx);
     if (result.memoryId) {
       await deferMemoryForReconciliation(deps.stores.pool, result.memoryId, filteredCandidates);
       console.log(`[deferred-audn] Deferred: ${result.memoryId} (${filteredCandidates.length} candidates)`);
@@ -102,7 +108,8 @@ export async function resolveAndExecuteAudn(
   if (deps.config.entityGraphEnabled && deps.stores.entity) {
     decision = await applyEntityScopedDedup(deps, decision, userId, fact.entities);
   }
-  return executeAndTrackSupersede(deps, decision, candidateIds, ctx, supersededTargets, requireTraceContext(traceContext), 'llm-audn', rawDecision.action, decision.action);
+  const llmCtx: AudnFactContext = { ...ctx, audnAction: decision.action };
+  return executeAndTrackSupersede(deps, decision, candidateIds, llmCtx, supersededTargets, requireTraceContext(traceContext), 'llm-audn', rawDecision.action, decision.action);
 }
 
 /** Execute the AUDN decision and track supersede targets. */
@@ -305,7 +312,7 @@ async function executeMutationDecision(
   if (decision.action === 'DELETE') {
     return await deleteCanonicalFact(deps, decision.targetMemoryId!, ctx.userId, ctx.fact, ctx.sourceSite, ctx.sourceUrl, ctx.episodeId, decision.contradictionConfidence, ctx.logicalTimestamp);
   }
-  return await supersedeCanonicalFact(deps, decision.targetMemoryId!, ctx.userId, ctx.fact, ctx.embedding, ctx.sourceSite, ctx.sourceUrl, ctx.episodeId, decision.contradictionConfidence, ctx.trustScore, ctx.logicalTimestamp, ctx.workspace);
+  return await supersedeCanonicalFact(deps, decision.targetMemoryId!, ctx.userId, ctx.fact, ctx.embedding, ctx.sourceSite, ctx.sourceUrl, ctx.episodeId, decision.contradictionConfidence, ctx.trustScore, ctx.logicalTimestamp, ctx.workspace, ctx.topKSimilarity);
 }
 
 async function updateCanonicalFact(
@@ -372,12 +379,15 @@ async function supersedeCanonicalFact(
   trustScore?: number,
   logicalTimestamp?: Date,
   workspace?: import('../db/repository-types.js').WorkspaceContext,
+  topKSimilarity?: number,
 ): Promise<{ outcome: Outcome; memoryId: string | null }> {
   const target = await ensureClaimTarget(deps, userId, targetMemoryId);
   await deps.stores.memory.expireMemory(userId, target.memoryId);
   const newMemoryId = await storeProjection(deps, userId, fact, embedding, sourceSite, sourceUrl, episodeId, trustScore ?? 1.0, {
     logicalTimestamp,
     workspace,
+    audnAction: 'SUPERSEDE',
+    topKSimilarity,
   });
   if (!newMemoryId) return { outcome: 'skipped', memoryId: null };
   const lineage = await emitLineageEvent({ claims: deps.stores.claim, repo: deps.stores.memory, config: deps.config }, {
