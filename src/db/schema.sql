@@ -432,3 +432,33 @@ CREATE INDEX IF NOT EXISTS idx_memory_atomic_facts_workspace
   ON memory_atomic_facts (workspace_id) WHERE workspace_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_memory_foresight_workspace
   ON memory_foresight (workspace_id) WHERE workspace_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- EXP-21: Per-entity temporal linkage list.
+--
+-- Sparse linked-list per entity sorted by `created_at`. At ingest time, when
+-- the per-entity temporal linkage flag is on, every fact stored emits one row
+-- per entity it mentions. At retrieval time, the search pipeline walks this
+-- list in chronological order to boost facts by their position so event-
+-- ordering (BEAM EO) and multi-session reasoning (BEAM MR) queries surface
+-- entity-scoped chronology.
+--
+-- `entity_id` is the lowercase canonical entity name (matching the extraction
+-- stage's casing). `fact_id` references `memory_atomic_facts(id)` — the
+-- atomic-fact projection produced by the same ingest path. ON DELETE CASCADE
+-- keeps the linkage in sync with fact lifecycle (UPDATE/SUPERSEDE deletes
+-- replace the projection rows, and so the linkage rows too).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS atomic_entity_temporal_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  fact_id UUID NOT NULL REFERENCES memory_atomic_facts(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_atomic_entity_temporal_links_traversal
+  ON atomic_entity_temporal_links (user_id, entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_atomic_entity_temporal_links_fact
+  ON atomic_entity_temporal_links (fact_id);

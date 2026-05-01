@@ -69,7 +69,14 @@ async function executeSearchStep(
     trace.stage('as-of-search', memories, { asOf });
     return { memories, activeTrace: trace, retrievalConfidence: null };
   }
-  const pipelineStores = { search: deps.stores.search, link: deps.stores.link, memory: deps.stores.memory, entity: deps.stores.entity, pool: deps.stores.pool };
+  const pipelineStores = {
+    search: deps.stores.search,
+    link: deps.stores.link,
+    memory: deps.stores.memory,
+    entity: deps.stores.entity,
+    representation: deps.stores.representation,
+    pool: deps.stores.pool,
+  };
   const pipelineResult = await runSearchPipelineWithTrace(pipelineStores, userId, query, effectiveLimit, sourceSite, referenceTime, {
     namespaceScope,
     retrievalMode: retrievalOptions?.retrievalMode,
