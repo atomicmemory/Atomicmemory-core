@@ -71,6 +71,11 @@ import {
   type StoreAtomicFactInput,
   type StoreForesightInput,
 } from './repository-representations.js';
+import {
+  listEntityTemporalLinks,
+  storeEntityTemporalLinks,
+  type StoreTemporalLinkInput,
+} from './repository-entity-temporal-links.js';
 export type {
   AgentScope,
   AtomicFactRow,
@@ -297,6 +302,14 @@ export class MemoryRepository {
 
   async listForesightForMemory(userId: string, parentMemoryId: string) {
     return listForesightForMemory(this.pool, userId, parentMemoryId);
+  }
+
+  async storeEntityTemporalLinks(links: StoreTemporalLinkInput[]) {
+    return storeEntityTemporalLinks(this.pool, links);
+  }
+
+  async listEntityTemporalLinks(userId: string, entityId: string, limit: number) {
+    return listEntityTemporalLinks(this.pool, userId, entityId, limit);
   }
 
   async deleteBySource(userId: string, sourceSite: string) {
