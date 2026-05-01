@@ -39,6 +39,7 @@ import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
 import { applyRecencyBinBoost } from './recency-bin-ranking.js';
 import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
+import { applySummaryDownweight } from './summary-downweight.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 import { computeRetrievalConfidence, type RetrievalConfidence } from './retrieval-confidence-gate.js';
@@ -99,6 +100,7 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'retrievalConfidenceMarginNormalizer'
   | 'retrievalConfidenceSimilarityNormalizer'
   | 'retrievalConfidenceFloor'
+  | 'summaryDownweightFactor'
 >;
 /**
  * Decide whether to auto-skip cross-encoder reranking.
@@ -783,6 +785,7 @@ function applyRankingProtectionStages(
     state = { ...state, candidates: currentStateRanked.results };
   }
 
+  state = applySummaryDownweightStage(query, state, trace, policyConfig);
   state = applyInstructionBoostStage(query, state, trace, policyConfig);
   state = applyRecencyBinStage(
     query,
@@ -795,6 +798,27 @@ function applyRankingProtectionStages(
   state = applyEventBoundaryStage(state, trace, policyConfig);
 
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
+}
+
+/**
+ * Wraps `applySummaryDownweight` with trace emission. No-op when the
+ * factor is >= 1 (default 0.5), when the query is summarization-style,
+ * or when no summary-tagged results are present. EXP-SUM.
+ */
+function applySummaryDownweightStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  const factor = policyConfig.summaryDownweightFactor;
+  if (!Number.isFinite(factor) || factor >= 1) return state;
+  const adjusted = applySummaryDownweight(state.candidates, query, {
+    summaryDownweightFactor: factor,
+  });
+  if (adjusted === state.candidates) return state;
+  trace.stage('summary-downweight', adjusted, { factor });
+  return { ...state, candidates: adjusted };
 }
 
 /**

@@ -159,6 +159,25 @@ export interface RuntimeConfig {
   costRunId: string;
   conflictAutoResolveMs: number;
   /**
+   * EXP-SUM: synthesize-only periodic consolidation. When enabled, every
+   * `summarySynthesisTurnInterval` ingested turns the system clusters
+   * active memories and stores LLM-synthesized summaries WITHOUT archiving
+   * the cluster members. Summaries are tagged `metadata.fact_role:
+   * 'summary'` and `metadata.summary_of: [ids]`. Defaults-off — preserves
+   * the existing archive-style consolidation as the only consolidation
+   * path until operators opt in.
+   */
+  summarySynthesisEnabled: boolean;
+  /** EXP-SUM: interval (in ingest turns) between synthesize-only runs. */
+  summarySynthesisTurnInterval: number;
+  /**
+   * EXP-SUM: multiplicative down-weight applied to summary-tagged results
+   * for non-summary-style queries. 0.5 halves the score; 1.0 disables the
+   * down-weight entirely. Summary-style queries (e.g. "summarize", "give
+   * me an overview") skip the down-weight so summaries surface naturally.
+   */
+  summaryDownweightFactor: number;
+  /**
    * Dev/test-only: when true, PUT /v1/memories/config mutates the runtime
    * singleton. Production deploys leave this unset (false) — the route
    * returns 410 Gone. Startup-validated; routes read the memoized value
@@ -414,6 +433,9 @@ export const config: RuntimeConfig = {
   costLogDir: optionalEnv('COST_LOG_DIR') ?? 'data/cost-logs',
   costRunId: optionalEnv('COST_RUN_ID') ?? '',
   conflictAutoResolveMs: parseInt(optionalEnv('CONFLICT_AUTO_RESOLVE_MS') ?? '86400000', 10),
+  summarySynthesisEnabled: (optionalEnv('SUMMARY_SYNTHESIS_ENABLED') ?? 'false') === 'true',
+  summarySynthesisTurnInterval: parsePositiveIntEnv('SUMMARY_SYNTHESIS_TURN_INTERVAL', 30),
+  summaryDownweightFactor: parseFloat(optionalEnv('SUMMARY_DOWNWEIGHT_FACTOR') ?? '0.5'),
   runtimeConfigMutationEnabled:
     (process.env.CORE_RUNTIME_CONFIG_MUTATION_ENABLED ?? 'false') === 'true',
 };
@@ -563,6 +585,9 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'compositeMaxClusterSize', 'compositeSimilarityThreshold',
   // Conflict handling
   'conflictAutoResolveMs',
+  // Synthesize-only periodic consolidation (EXP-SUM)
+  'summarySynthesisEnabled', 'summarySynthesisTurnInterval',
+  'summaryDownweightFactor',
 ] as const;
 
 export type SupportedRuntimeConfigField = typeof SUPPORTED_RUNTIME_CONFIG_FIELDS[number];
