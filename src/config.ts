@@ -140,6 +140,15 @@ export interface RuntimeConfig {
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  /**
+   * EXP-21: when true, ingest writes per-entity temporal linkage rows for
+   * every fact stored, and retrieval traverses the per-entity timeline to
+   * boost candidates by their chronological position. Defaults-off per
+   * Sprint 2 rule. See `src/services/entity-temporal-linkage.ts`.
+   */
+  perEntityTemporalLinkageEnabled: boolean;
+  /** EXP-21: additive score boost applied per linkage-list rank. */
+  perEntityTemporalLinkageBoostWeight: number;
   eventBoundaryExtractionEnabled: boolean;
   eventBoundaryRetrievalBoost: number;
   retrievalConfidenceGateEnabled: boolean;
@@ -398,6 +407,10 @@ export const config: RuntimeConfig = {
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
   recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
+  perEntityTemporalLinkageEnabled:
+    (optionalEnv('PER_ENTITY_TEMPORAL_LINKAGE_ENABLED') ?? 'false') === 'true',
+  perEntityTemporalLinkageBoostWeight:
+    parseFloat(optionalEnv('PER_ENTITY_TEMPORAL_LINKAGE_BOOST_WEIGHT') ?? '0.15'),
   eventBoundaryExtractionEnabled: (optionalEnv('EVENT_BOUNDARY_EXTRACTION_ENABLED') ?? 'false') === 'true',
   eventBoundaryRetrievalBoost: parseFloat(optionalEnv('EVENT_BOUNDARY_RETRIEVAL_BOOST') ?? '0.4'),
   retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
@@ -549,6 +562,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
   'recencyBinBoostEnabled', 'recencyBinBoostWeight',
+  // Per-entity temporal linkage (EXP-21)
+  'perEntityTemporalLinkageEnabled', 'perEntityTemporalLinkageBoostWeight',
   // Event boundary extraction (EXP-13)
   'eventBoundaryExtractionEnabled', 'eventBoundaryRetrievalBoost',
   // Retrieval confidence gate (EXP-14)

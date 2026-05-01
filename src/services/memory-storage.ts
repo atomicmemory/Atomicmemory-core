@@ -10,6 +10,7 @@ import { classifyNetwork } from './memory-network.js';
 import { buildRelationClaimSlot } from './claim-slotting.js';
 import { extractConflictKeywords, mergeCandidates, type CandidateMemory } from './conflict-policy.js';
 import { buildAtomicFactProjection, buildForesightProjections } from './memcell-projection.js';
+import { normalizeEntityId } from './entity-temporal-linkage.js';
 import { inferNamespace, classifyNamespace } from './namespace-retrieval.js';
 import { generateL1Overview } from './tiered-context.js';
 import { emitAuditEvent } from './audit-events.js';
@@ -134,7 +135,7 @@ export async function storeProjection(
   });
 
   const atomicFact = buildAtomicFactProjection(fact, embedding);
-  await deps.stores.representation.storeAtomicFacts([{
+  const factIds = await deps.stores.representation.storeAtomicFacts([{
     userId, parentMemoryId: memoryId,
     factText: atomicFact.factText, embedding: atomicFact.embedding,
     factType: atomicFact.factType, importance: atomicFact.importance,
@@ -142,6 +143,7 @@ export async function storeProjection(
     keywords: atomicFact.keywords.join(' '), metadata: atomicFact.metadata,
     workspaceId: options.workspace?.workspaceId, agentId: options.workspace?.agentId,
   }]);
+  await maybeWriteEntityTemporalLinks(deps, userId, fact.entities, factIds, createdAt);
 
   const foresight = buildForesightProjections(fact, embedding);
   if (foresight.length > 0) {
@@ -293,6 +295,36 @@ async function storeRelations(
       console.error(`Relation storage failed for "${relation.source}" -> "${relation.target}": ${err instanceof Error ? err.message : err}`);
     }
   }
+}
+
+/**
+ * EXP-21: emit one per-entity temporal-link row for every entity mentioned
+ * in the just-stored fact. No-op when the flag is off, the fact has zero
+ * extracted entities, or no atomic-fact projection ids were returned (e.g.
+ * extraction produced an empty fact). Errors are logged and propagated —
+ * fail closed per the Sprint 2 rule.
+ */
+async function maybeWriteEntityTemporalLinks(
+  deps: MemoryServiceDeps,
+  userId: string,
+  entities: ExtractedEntity[],
+  factIds: string[],
+  createdAt: Date,
+): Promise<void> {
+  if (!deps.config.perEntityTemporalLinkageEnabled) return;
+  if (entities.length === 0 || factIds.length === 0) return;
+  const factId = factIds[0];
+  const seen = new Set<string>();
+  const links = entities
+    .map((entity) => normalizeEntityId(entity.name))
+    .filter((entityId) => {
+      if (entityId.length < 2 || seen.has(entityId)) return false;
+      seen.add(entityId);
+      return true;
+    })
+    .map((entityId) => ({ userId, entityId, factId, createdAt }));
+  if (links.length === 0) return;
+  await deps.stores.representation.storeEntityTemporalLinks(links);
 }
 
 /** Ensure a claim target exists for the given memory, creating one if needed. */
