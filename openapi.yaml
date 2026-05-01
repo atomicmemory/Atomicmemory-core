@@ -2604,6 +2604,7 @@ paths:
                               type: string
                             type: array
                           filter_decisions:
+                            description: Per-candidate threshold decisions emitted only when retrieval tracing is enabled. Entries include per-result source_site, source_kind, and namespace for debugging disclosure scope.
                             items:
                               properties:
                                 decision:
@@ -3043,6 +3044,7 @@ paths:
                               type: string
                             type: array
                           filter_decisions:
+                            description: Per-candidate threshold decisions emitted only when retrieval tracing is enabled. Entries include per-result source_site, source_kind, and namespace for debugging disclosure scope.
                             items:
                               properties:
                                 decision:

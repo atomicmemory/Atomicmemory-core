@@ -125,13 +125,20 @@ export async function searchVectorsInWorkspace(
   const result = await pool.query(
     `SELECT *,
        1 - (embedding <=> $1) AS similarity,
+       1 - (embedding <=> $1) AS semantic_similarity,
+       GREATEST(0, LEAST(1, 1 - (embedding <=> $1))) AS relevance,
+       (
+         $4 * (1 - (embedding <=> $1))
+         + $5 * importance
+         + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+       ) * COALESCE(trust_score, 1.0) AS score,
        (
          $4 * (1 - (embedding <=> $1))
          + CASE WHEN (1 - (embedding <=> $1)) >= $8 THEN (
            $5 * importance
            + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
          ) ELSE 0 END
-       ) * COALESCE(trust_score, 1.0) AS score
+       ) * COALESCE(trust_score, 1.0) AS ranking_score
      FROM memories
      WHERE workspace_id = $2
        AND deleted_at IS NULL
@@ -139,7 +146,7 @@ export async function searchVectorsInWorkspace(
        AND status = 'active'
        ${agentClause.sql}
        ${visibilityClause.sql}
-     ORDER BY score DESC
+     ORDER BY ranking_score DESC
      LIMIT $3`,
     params,
   );
@@ -251,13 +258,20 @@ async function searchVectorsPg(
   const result = await pool.query(
     `SELECT *,
        1 - (embedding <=> $1) AS similarity,
+       1 - (embedding <=> $1) AS semantic_similarity,
+       GREATEST(0, LEAST(1, 1 - (embedding <=> $1))) AS relevance,
+       (
+         $4 * (1 - (embedding <=> $1))
+         + $5 * importance
+         + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
+       ) * COALESCE(trust_score, 1.0) AS score,
        (
          $4 * (1 - (embedding <=> $1))
          + CASE WHEN (1 - (embedding <=> $1)) >= $8 THEN (
            $5 * importance
            + $6 * EXP(-EXTRACT(EPOCH FROM ($7::timestamptz - last_accessed_at)) / 2592000.0)
          ) ELSE 0 END
-       ) * COALESCE(trust_score, 1.0) AS score
+       ) * COALESCE(trust_score, 1.0) AS ranking_score
      FROM memories
      WHERE user_id = $2
        AND deleted_at IS NULL
@@ -265,7 +279,7 @@ async function searchVectorsPg(
        AND status = 'active'
        AND workspace_id IS NULL
        ${siteClause}
-     ORDER BY score DESC
+     ORDER BY ranking_score DESC
      LIMIT $3`,
     params,
   );
@@ -309,7 +323,10 @@ async function searchKeywordPg(
   const result = await pool.query(
     `SELECT *,
        LEAST(ts_rank(search_vector, plainto_tsquery('english', $2)), 1.0) AS similarity,
-       ts_rank(search_vector, plainto_tsquery('english', $2)) AS score
+       LEAST(ts_rank(search_vector, plainto_tsquery('english', $2)), 1.0) AS semantic_similarity,
+       LEAST(ts_rank(search_vector, plainto_tsquery('english', $2)), 1.0) AS relevance,
+       ts_rank(search_vector, plainto_tsquery('english', $2)) AS score,
+       ts_rank(search_vector, plainto_tsquery('english', $2)) AS ranking_score
      FROM memories
      WHERE user_id = $1
        AND deleted_at IS NULL
@@ -362,6 +379,14 @@ async function searchHybridPg(
      )
      SELECT m.*,
        1 - (m.embedding <=> $1) AS similarity,
+       1 - (m.embedding <=> $1) AS semantic_similarity,
+       GREATEST(0, LEAST(1, 1 - (m.embedding <=> $1))) AS relevance,
+       (
+         $5 * (1 - (m.embedding <=> $1))
+         + $6 * m.importance
+         + $7 * EXP(-EXTRACT(EPOCH FROM ($8::timestamptz - m.last_accessed_at)) / 2592000.0)
+         + ${config.retrievalProfileSettings.lexicalWeight} * f.rrf_score
+       ) * COALESCE(m.trust_score, 1.0) AS score,
        (
          $5 * (1 - (m.embedding <=> $1))
          + CASE WHEN (1 - (m.embedding <=> $1)) >= $9 THEN (
@@ -370,10 +395,10 @@ async function searchHybridPg(
          ) ELSE 0 END
          -- Lexical RRF stays outside the semantic boost gate because exact text match is itself a relevance signal.
          + ${config.retrievalProfileSettings.lexicalWeight} * f.rrf_score
-       ) * COALESCE(m.trust_score, 1.0) AS score
+       ) * COALESCE(m.trust_score, 1.0) AS ranking_score
      FROM fused f
      JOIN memories m ON m.id = f.id
-     ORDER BY score DESC
+     ORDER BY ranking_score DESC
      LIMIT $4`,
     params,
   );
@@ -429,7 +454,7 @@ function rankAndSortMemories(
 ): SearchResult[] {
   return memories
     .map((memory) => rankMemory(memory, queryEmbedding, referenceTime))
-    .sort((left, right) => right.score - left.score)
+    .sort((left, right) => (right.ranking_score ?? right.score) - (left.ranking_score ?? left.score))
     .slice(0, normalizeLimit(limit));
 }
 
@@ -449,9 +474,18 @@ async function loadActiveMemories(pool: pg.Pool, userId: string, sourceSite?: st
 
 function rankMemory(memory: MemoryRow, queryEmbedding: number[], referenceTime?: Date): SearchResult {
   const similarity = cosineSimilarity(queryEmbedding, memory.embedding);
-  const rawScore = computeScore(similarity, memory.importance, memory.last_accessed_at, referenceTime);
+  const rawScore = computeScore(similarity, memory.importance, memory.last_accessed_at, referenceTime, false);
   const score = rawScore * (memory.trust_score ?? 1.0);
-  return { ...memory, similarity, score };
+  const rawRankingScore = computeScore(similarity, memory.importance, memory.last_accessed_at, referenceTime, true);
+  const rankingScore = rawRankingScore * (memory.trust_score ?? 1.0);
+  return {
+    ...memory,
+    similarity,
+    score,
+    semantic_similarity: similarity,
+    ranking_score: rankingScore,
+    relevance: clampUnit(similarity),
+  };
 }
 
 function buildCandidate(memory: MemoryRow, queryEmbedding: number[]): CandidateRow {
@@ -475,11 +509,19 @@ function buildApproximateShortlist(memories: MemoryRow[], queryEmbedding: number
     .map((entry) => entry.memory);
 }
 
-function computeScore(similarity: number, importance: number, lastAccessedAt: Date, referenceTime?: Date): number {
+function computeScore(
+  similarity: number,
+  importance: number,
+  lastAccessedAt: Date,
+  referenceTime: Date | undefined,
+  applyRankingFloor: boolean,
+): number {
   const refMs = referenceTime ? referenceTime.getTime() : Date.now();
   const secondsSinceAccess = (refMs - lastAccessedAt.getTime()) / 1000;
   const recency = Math.exp(-secondsSinceAccess / 2592000.0);
-  const nonSemanticScore = similarity >= clampUnit(config.retrievalProfileSettings.rankingMinSimilarity)
+  const canUseNonSemanticScore = !applyRankingFloor
+    || similarity >= clampUnit(config.retrievalProfileSettings.rankingMinSimilarity);
+  const nonSemanticScore = canUseNonSemanticScore
     ? (config.scoringWeightImportance * importance) + (config.scoringWeightRecency * recency)
     : 0;
   return (config.scoringWeightSimilarity * similarity) + nonSemanticScore;

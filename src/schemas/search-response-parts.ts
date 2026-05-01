@@ -77,7 +77,11 @@ const RetrievalTraceSchema = z.object({
     threshold: z.number().nullable(),
     decision: z.enum(['kept', 'filtered']),
     reason: z.string(),
-  })).optional(),
+  })).optional().openapi({
+    description:
+      'Per-candidate threshold decisions emitted only when retrieval tracing is enabled. ' +
+      'Entries include per-result source_site, source_kind, and namespace for debugging disclosure scope.',
+  }),
   trace_id: z.string().optional(),
   stage_count: z.number().optional(),
   stage_names: z.array(z.string()).optional(),

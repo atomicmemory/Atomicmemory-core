@@ -328,6 +328,9 @@ export function resolveRecallBypass(
 ): string | null {
   if (context.asOf || context.referenceTime) return RECALL_BYPASS_REASONS.AS_OF_QUERY;
   if (context.sourceSite) return RECALL_BYPASS_REASONS.SOURCE_SITE_FILTER;
+  // State queries need recall even when the adaptive-depth classifier calls
+  // them simple/medium; regression tests pin representative cross-classifier
+  // cases so these regex classifiers do not drift unnoticed.
   if (isCurrentStateQuery(query) || isHistoricalQuery(query)) return RECALL_BYPASS_REASONS.TEMPORAL_STATE_QUERY;
   if (RECALL_ORIENTED_QUERY_LABELS.has(queryLabel)) return RECALL_BYPASS_REASONS.recallOriented(queryLabel);
   return null;

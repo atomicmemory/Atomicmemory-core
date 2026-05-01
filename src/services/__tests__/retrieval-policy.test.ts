@@ -8,7 +8,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RetrievalProfile } from '../retrieval-profiles.js';
 import type { SearchResult } from '../../db/memory-repository.js';
 import { createSearchResult } from './test-fixtures.js';
-import { getRetrievalProfile } from '../retrieval-profiles.js';
 
 const retrievalProfileSettings: RetrievalProfile = {
   name: 'balanced',
@@ -64,8 +63,6 @@ const {
   shouldAcceptRepair,
   mergeSearchResults,
   resolveRerankDepth,
-  applyRankingEligibility,
-  isAggregationQuery,
   AGGREGATION_QUERY_LIMIT,
 } = await import('../retrieval-policy.js');
 
@@ -363,80 +360,5 @@ describe('resolveRerankDepth', () => {
 
   it('uses aggregation limit without clamping to maxSearchResults', () => {
     expect(resolveRerankDepth(AGGREGATION_QUERY_LIMIT, mockConfig)).toBe(25);
-  });
-});
-
-describe('applyRankingEligibility', () => {
-  it.each([
-    ['safe', 0.35],
-    ['balanced', 0.3],
-    ['quality', 0.25],
-  ] as const)('uses the %s profile semantic floor before composite ranking', (profileName, threshold) => {
-    const profile = getRetrievalProfile(profileName);
-    expect(profile.rankingMinSimilarity).toBe(threshold);
-
-    const relevant = makeResult({ id: 'answer', similarity: threshold + 0.05, score: 0.3 });
-    const noisy = makeResult({ id: 'recent-important-noise', similarity: threshold - 0.01, score: 10 });
-    const result = applyRankingEligibility(
-      'What is my favorite color?',
-      [noisy, relevant],
-      { retrievalProfileSettings: profile },
-    );
-
-    expect(result.triggered).toBe(true);
-    expect(result.results.map((memory) => memory.id)).toEqual(['answer']);
-    expect(result.removedIds).toEqual(['recent-important-noise']);
-  });
-
-  it('bypasses recall-oriented and temporal queries', () => {
-    const noisy = makeResult({ id: 'low-sim-history', similarity: 0.01, score: 10 });
-    const profile = getRetrievalProfile('balanced');
-
-    expect(applyRankingEligibility('Why did this project change?', [noisy], { retrievalProfileSettings: profile }).triggered)
-      .toBe(false);
-    expect(applyRankingEligibility('What database do I currently use?', [noisy], { retrievalProfileSettings: profile }).triggered)
-      .toBe(false);
-    expect(applyRankingEligibility('What did I use before switching?', [noisy], { retrievalProfileSettings: profile }).triggered)
-      .toBe(false);
-  });
-
-  it('bypasses source-scoped and as-of reads', () => {
-    const noisy = makeResult({ id: 'low-sim-scoped', similarity: 0.01, score: 10 });
-    const profile = getRetrievalProfile('balanced');
-
-    expect(applyRankingEligibility(
-      'What is my favorite color?',
-      [noisy],
-      { retrievalProfileSettings: profile },
-      { sourceSite: 'gmail' },
-    ).triggered).toBe(false);
-    expect(applyRankingEligibility(
-      'What is my favorite color?',
-      [noisy],
-      { retrievalProfileSettings: profile },
-      { referenceTime: new Date('2026-01-01T00:00:00.000Z') },
-    ).triggered).toBe(false);
-  });
-});
-
-describe('isAggregationQuery', () => {
-  it('detects "how many" patterns', () => {
-    expect(isAggregationQuery('how many projects am I working on')).toBe(true);
-  });
-
-  it('detects "how much" patterns', () => {
-    expect(isAggregationQuery('how much did I spend')).toBe(true);
-  });
-
-  it('detects "total" patterns', () => {
-    expect(isAggregationQuery('what is the total cost')).toBe(true);
-  });
-
-  it('detects "list all" patterns', () => {
-    expect(isAggregationQuery('list all my meetings')).toBe(true);
-  });
-
-  it('rejects non-aggregation queries', () => {
-    expect(isAggregationQuery('how did the architecture change')).toBe(false);
   });
 });

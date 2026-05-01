@@ -115,7 +115,6 @@ function buildGate(
   queryLabel: QueryComplexityLabel,
 ): RelevanceGate {
   const threshold = clampUnit(rawThreshold);
-  if (threshold <= 0) return { threshold: null, source: 'disabled', reason: 'non-positive-threshold', queryLabel };
   return { threshold, source, reason, queryLabel };
 }
 
