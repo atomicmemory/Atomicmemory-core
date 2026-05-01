@@ -136,6 +136,17 @@ export interface RuntimeConfig {
   instructionBoostEnabled: boolean;
   /** EXP-05: additive score boost applied to instruction-tagged results. */
   instructionBoostWeight: number;
+  /**
+   * EXP-IF: when true AND the query is instruction-style (see
+   * `instruction-query-detector.ts`), retrieval surfaces the top
+   * `instructionPreferenceTopK` memories tagged
+   * `metadata.fact_role: 'instruction'` ahead of the general candidate
+   * pool. Targets the BEAM IF slice where the boost (4% subset) is
+   * insufficient to move the score. Defaults-off per Sprint 2 rule.
+   */
+  instructionPreferenceRetrievalEnabled: boolean;
+  /** EXP-IF: how many instruction-tagged slots to reserve at the top. */
+  instructionPreferenceTopK: number;
   temporalQueryConstraintEnabled: boolean;
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
@@ -394,6 +405,9 @@ export const config: RuntimeConfig = {
   literalListProtectionMaxProtected: parsePositiveIntEnv('LITERAL_LIST_PROTECTION_MAX_PROTECTED', 3),
   instructionBoostEnabled: (optionalEnv('INSTRUCTION_BOOST_ENABLED') ?? 'false') === 'true',
   instructionBoostWeight: parseFloat(optionalEnv('INSTRUCTION_BOOST_WEIGHT') ?? '0.15'),
+  instructionPreferenceRetrievalEnabled:
+    (optionalEnv('INSTRUCTION_PREFERENCE_RETRIEVAL_ENABLED') ?? 'false') === 'true',
+  instructionPreferenceTopK: parsePositiveIntEnv('INSTRUCTION_PREFERENCE_TOP_K', 5),
   temporalQueryConstraintEnabled: (optionalEnv('TEMPORAL_QUERY_CONSTRAINT_ENABLED') ?? 'false') === 'true',
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
@@ -545,6 +559,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'literalListProtectionEnabled', 'literalListProtectionMaxProtected',
   // Instruction-type retrieval boost (EXP-05)
   'instructionBoostEnabled', 'instructionBoostWeight',
+  // Instruction-preference two-stage retrieval (EXP-IF)
+  'instructionPreferenceRetrievalEnabled', 'instructionPreferenceTopK',
   // Temporal query selection
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
