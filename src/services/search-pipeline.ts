@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import type pg from 'pg';
 import type { CoreRuntimeConfig } from '../app/runtime-container.js';
 import type { SearchResult } from '../db/repository-types.js';
-import type { SearchStore, SemanticLinkStore, MemoryStore, EntityStore } from '../db/stores.js';
+import type { SearchStore, SemanticLinkStore, MemoryStore, EntityStore, RepresentationStore } from '../db/stores.js';
 import { embedText } from './embedding.js';
 import { rewriteQuery } from './extraction.js';
 import {
@@ -38,7 +38,9 @@ import { applyCurrentStateRanking } from './current-state-ranking.js';
 import { applyConcisenessPenalty } from './conciseness-preference.js';
 import { applyInstructionBoost } from './instruction-boost.js';
 import { applyRecencyBinBoost } from './recency-bin-ranking.js';
+import { applyEntityTemporalLinkageBoost } from './entity-temporal-linkage.js';
 import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
+import { applySummaryDownweight } from './summary-downweight.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 import { computeRetrievalConfidence, type RetrievalConfidence } from './retrieval-confidence-gate.js';
@@ -88,6 +90,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'repairLoopMinSimilarity'
   | 'recencyBinBoostEnabled'
   | 'recencyBinBoostWeight'
+  | 'perEntityTemporalLinkageEnabled'
+  | 'perEntityTemporalLinkageBoostWeight'
   | 'eventBoundaryExtractionEnabled'
   | 'eventBoundaryRetrievalBoost'
   | 'rerankSkipMinGap'
@@ -99,6 +103,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'retrievalConfidenceMarginNormalizer'
   | 'retrievalConfidenceSimilarityNormalizer'
   | 'retrievalConfidenceFloor'
+  | 'retrievalConfidenceTopKWindow'
+  | 'summaryDownweightFactor'
 >;
 /**
  * Decide whether to auto-skip cross-encoder reranking.
@@ -141,6 +147,8 @@ export interface SearchPipelineStores {
   link: SemanticLinkStore;
   memory: MemoryStore;
   entity: EntityStore | null;
+  /** EXP-21: optional representation store for per-entity temporal linkage. */
+  representation?: RepresentationStore;
   /** Raw pool access — only used by personalizedPageRank. */
   pool: pg.Pool;
 }
@@ -721,10 +729,14 @@ async function applyExpansionAndReranking(
     referenceTime,
   );
 
+  const linkageBoosted = await applyEntityTemporalLinkageStage(
+    stores, userId, query, ranked.candidates, trace, policyConfig,
+  );
+
   return selectAndExpandCandidates(
     stores,
     userId,
-    ranked.candidates,
+    linkageBoosted,
     queryEmbedding,
     limit,
     referenceTime,
@@ -732,6 +744,42 @@ async function applyExpansionAndReranking(
     trace,
     policyConfig,
   );
+}
+
+/**
+ * EXP-21: per-entity temporal linkage boost. Sits between the protection
+ * stages and `selectAndExpandCandidates` so it runs after current-state-
+ * ranking / recency-bin / event-boundary but before MMR + link expansion.
+ * No-op when the flag is off, the representation store isn't wired, or
+ * the query has no extractable entity.
+ */
+async function applyEntityTemporalLinkageStage(
+  stores: SearchPipelineStores,
+  userId: string,
+  query: string,
+  candidates: SearchResult[],
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  if (!policyConfig.perEntityTemporalLinkageEnabled) return candidates;
+  if (!stores.representation) return candidates;
+  const boost = await applyEntityTemporalLinkageBoost({
+    query,
+    candidates,
+    userId,
+    representation: stores.representation,
+    config: {
+      perEntityTemporalLinkageEnabled: policyConfig.perEntityTemporalLinkageEnabled,
+      perEntityTemporalLinkageBoostWeight: policyConfig.perEntityTemporalLinkageBoostWeight,
+    },
+  });
+  if (!boost.applied) return candidates;
+  trace.stage('entity-temporal-linkage', boost.results, {
+    matchedEntities: boost.matchedEntities,
+    boostedCount: boost.boostedCount,
+    weight: policyConfig.perEntityTemporalLinkageBoostWeight,
+  });
+  return boost.results;
 }
 
 interface RankedCandidateState {
@@ -783,6 +831,7 @@ function applyRankingProtectionStages(
     state = { ...state, candidates: currentStateRanked.results };
   }
 
+  state = applySummaryDownweightStage(query, state, trace, policyConfig);
   state = applyInstructionBoostStage(query, state, trace, policyConfig);
   state = applyRecencyBinStage(
     query,
@@ -795,6 +844,27 @@ function applyRankingProtectionStages(
   state = applyEventBoundaryStage(state, trace, policyConfig);
 
   return { ...state, candidates: applyConcisenessPenalty(state.candidates) };
+}
+
+/**
+ * Wraps `applySummaryDownweight` with trace emission. No-op when the
+ * factor is >= 1 (default 0.5), when the query is summarization-style,
+ * or when no summary-tagged results are present. EXP-SUM.
+ */
+function applySummaryDownweightStage(
+  query: string,
+  state: RankedCandidateState,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): RankedCandidateState {
+  const factor = policyConfig.summaryDownweightFactor;
+  if (!Number.isFinite(factor) || factor >= 1) return state;
+  const adjusted = applySummaryDownweight(state.candidates, query, {
+    summaryDownweightFactor: factor,
+  });
+  if (adjusted === state.candidates) return state;
+  trace.stage('summary-downweight', adjusted, { factor });
+  return { ...state, candidates: adjusted };
 }
 
 /**

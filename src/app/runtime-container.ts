@@ -108,6 +108,9 @@ export interface CoreRuntimeConfig {
   queryExpansionMinSimilarity: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  /** EXP-21: per-entity temporal linkage (ingest write + retrieval boost). */
+  perEntityTemporalLinkageEnabled: boolean;
+  perEntityTemporalLinkageBoostWeight: number;
   repairConfidenceFloor: number;
   repairDeltaThreshold: number;
   repairLoopEnabled: boolean;
@@ -123,6 +126,9 @@ export interface CoreRuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  retrievalConfidenceTopKWindow: number;
+  /** EXP-SUM: see RuntimeConfig.summaryDownweightFactor. */
+  summaryDownweightFactor: number;
 }
 
 /** Repositories constructed by the runtime container. */

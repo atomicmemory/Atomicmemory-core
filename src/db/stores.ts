@@ -23,6 +23,7 @@ import type {
 } from './repository-types.js';
 import type { CandidateRow } from './repository-vector-search.js';
 import type { StoreAtomicFactInput, StoreForesightInput } from './repository-representations.js';
+import type { StoreTemporalLinkInput, EntityTemporalLinkRow } from './repository-entity-temporal-links.js';
 import type { MemoryLink } from './repository-links.js';
 
 // StoreMemoryInput is shared with the repository write path; re-exported
@@ -114,6 +115,10 @@ export interface RepresentationStore {
   listForesightForMemory(userId: string, parentMemoryId: string): Promise<ForesightRow[]>;
   replaceAtomicFactsForMemory(userId: string, parentMemoryId: string, facts: StoreAtomicFactInput[]): Promise<string[]>;
   replaceForesightForMemory(userId: string, parentMemoryId: string, entries: StoreForesightInput[]): Promise<string[]>;
+  /** EXP-21: append per-entity temporal linkage rows. */
+  storeEntityTemporalLinks(links: StoreTemporalLinkInput[]): Promise<number>;
+  /** EXP-21: fetch the per-entity link list ordered by created_at ASC. */
+  listEntityTemporalLinks(userId: string, entityId: string, limit: number): Promise<EntityTemporalLinkRow[]>;
 }
 
 // ---------------------------------------------------------------------------

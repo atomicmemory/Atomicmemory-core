@@ -140,12 +140,22 @@ export interface RuntimeConfig {
   temporalQueryConstraintBoost: number;
   recencyBinBoostEnabled: boolean;
   recencyBinBoostWeight: number;
+  /**
+   * EXP-21: when true, ingest writes per-entity temporal linkage rows for
+   * every fact stored, and retrieval traverses the per-entity timeline to
+   * boost candidates by their chronological position. Defaults-off per
+   * Sprint 2 rule. See `src/services/entity-temporal-linkage.ts`.
+   */
+  perEntityTemporalLinkageEnabled: boolean;
+  /** EXP-21: additive score boost applied per linkage-list rank. */
+  perEntityTemporalLinkageBoostWeight: number;
   eventBoundaryExtractionEnabled: boolean;
   eventBoundaryRetrievalBoost: number;
   retrievalConfidenceGateEnabled: boolean;
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  retrievalConfidenceTopKWindow: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -158,6 +168,25 @@ export interface RuntimeConfig {
   costLogDir: string;
   costRunId: string;
   conflictAutoResolveMs: number;
+  /**
+   * EXP-SUM: synthesize-only periodic consolidation. When enabled, every
+   * `summarySynthesisTurnInterval` ingested turns the system clusters
+   * active memories and stores LLM-synthesized summaries WITHOUT archiving
+   * the cluster members. Summaries are tagged `metadata.fact_role:
+   * 'summary'` and `metadata.summary_of: [ids]`. Defaults-off — preserves
+   * the existing archive-style consolidation as the only consolidation
+   * path until operators opt in.
+   */
+  summarySynthesisEnabled: boolean;
+  /** EXP-SUM: interval (in ingest turns) between synthesize-only runs. */
+  summarySynthesisTurnInterval: number;
+  /**
+   * EXP-SUM: multiplicative down-weight applied to summary-tagged results
+   * for non-summary-style queries. 0.5 halves the score; 1.0 disables the
+   * down-weight entirely. Summary-style queries (e.g. "summarize", "give
+   * me an overview") skip the down-weight so summaries surface naturally.
+   */
+  summaryDownweightFactor: number;
   /**
    * Dev/test-only: when true, PUT /v1/memories/config mutates the runtime
    * singleton. Production deploys leave this unset (false) — the route
@@ -398,12 +427,17 @@ export const config: RuntimeConfig = {
   temporalQueryConstraintBoost: parseFloat(optionalEnv('TEMPORAL_QUERY_CONSTRAINT_BOOST') ?? '2'),
   recencyBinBoostEnabled: (optionalEnv('RECENCY_BIN_BOOST_ENABLED') ?? 'false') === 'true',
   recencyBinBoostWeight: parseFloat(optionalEnv('RECENCY_BIN_BOOST_WEIGHT') ?? '0.10'),
+  perEntityTemporalLinkageEnabled:
+    (optionalEnv('PER_ENTITY_TEMPORAL_LINKAGE_ENABLED') ?? 'false') === 'true',
+  perEntityTemporalLinkageBoostWeight:
+    parseFloat(optionalEnv('PER_ENTITY_TEMPORAL_LINKAGE_BOOST_WEIGHT') ?? '0.15'),
   eventBoundaryExtractionEnabled: (optionalEnv('EVENT_BOUNDARY_EXTRACTION_ENABLED') ?? 'false') === 'true',
   eventBoundaryRetrievalBoost: parseFloat(optionalEnv('EVENT_BOUNDARY_RETRIEVAL_BOOST') ?? '0.4'),
   retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
-  retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.05'),
-  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.5'),
-  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.3'),
+  retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.15'),
+  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.85'),
+  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.6'),
+  retrievalConfidenceTopKWindow: parseInt(optionalEnv('RETRIEVAL_CONFIDENCE_TOP_K_WINDOW') ?? '3', 10),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -414,6 +448,9 @@ export const config: RuntimeConfig = {
   costLogDir: optionalEnv('COST_LOG_DIR') ?? 'data/cost-logs',
   costRunId: optionalEnv('COST_RUN_ID') ?? '',
   conflictAutoResolveMs: parseInt(optionalEnv('CONFLICT_AUTO_RESOLVE_MS') ?? '86400000', 10),
+  summarySynthesisEnabled: (optionalEnv('SUMMARY_SYNTHESIS_ENABLED') ?? 'false') === 'true',
+  summarySynthesisTurnInterval: parsePositiveIntEnv('SUMMARY_SYNTHESIS_TURN_INTERVAL', 30),
+  summaryDownweightFactor: parseFloat(optionalEnv('SUMMARY_DOWNWEIGHT_FACTOR') ?? '0.5'),
   runtimeConfigMutationEnabled:
     (process.env.CORE_RUNTIME_CONFIG_MUTATION_ENABLED ?? 'false') === 'true',
 };
@@ -549,11 +586,14 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'temporalQueryConstraintEnabled', 'temporalQueryConstraintBoost',
   // Recency-bin boost (EXP-12)
   'recencyBinBoostEnabled', 'recencyBinBoostWeight',
+  // Per-entity temporal linkage (EXP-21)
+  'perEntityTemporalLinkageEnabled', 'perEntityTemporalLinkageBoostWeight',
   // Event boundary extraction (EXP-13)
   'eventBoundaryExtractionEnabled', 'eventBoundaryRetrievalBoost',
   // Retrieval confidence gate (EXP-14)
   'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
   'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',
+  'retrievalConfidenceTopKWindow',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred
@@ -563,6 +603,9 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   'compositeMaxClusterSize', 'compositeSimilarityThreshold',
   // Conflict handling
   'conflictAutoResolveMs',
+  // Synthesize-only periodic consolidation (EXP-SUM)
+  'summarySynthesisEnabled', 'summarySynthesisTurnInterval',
+  'summaryDownweightFactor',
 ] as const;
 
 export type SupportedRuntimeConfigField = typeof SUPPORTED_RUNTIME_CONFIG_FIELDS[number];

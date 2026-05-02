@@ -814,6 +814,7 @@ function formatSearchResponse(result: RetrievalResult, scope: MemoryScope) {
         confidence: result.retrievalConfidence.confidence,
         top_similarity: result.retrievalConfidence.topSimilarity,
         margin: result.retrievalConfidence.margin,
+        top_k_mean: result.retrievalConfidence.topKMean,
       },
     } : {}),
   };

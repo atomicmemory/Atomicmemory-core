@@ -12,6 +12,7 @@ import { timed } from './timing.js';
 import { runPostWriteProcessors } from './ingest-post-write.js';
 import { processFactThroughPipeline } from './ingest-fact-pipeline.js';
 import { resolveSessionDate } from './session-date.js';
+import { synthesizeSummariesForUser } from './summary-synthesis.js';
 import type { WorkspaceContext } from '../db/repository-types.js';
 import type {
   IngestResult,
@@ -112,6 +113,7 @@ export async function performIngest(
   });
 
   console.log(`[timing] ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${facts.length} facts, ${postWrite.compositesCreated} composites)`);
+  await synthesizeSummariesForUser(deps, userId);
   return finalizeIngestResult(
     episodeId,
     facts.length,
@@ -161,6 +163,7 @@ export async function performQuickIngest(
   });
 
   console.log(`[timing] quick-ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${extractedFacts.length} facts, ${acc.counters.stored} stored, ${acc.counters.skipped} skipped)`);
+  await synthesizeSummariesForUser(deps, userId);
   return finalizeIngestResult(
     episodeId,
     extractedFacts.length,
@@ -290,6 +293,7 @@ export async function performWorkspaceIngest(
   });
 
   console.log(`[timing] ws-ingest.total: ${(performance.now() - ingestStart).toFixed(1)}ms (${facts.length} facts, workspace=${workspace.workspaceId})`);
+  await synthesizeSummariesForUser(deps, userId);
   return finalizeIngestResult(
     episodeId,
     facts.length,
