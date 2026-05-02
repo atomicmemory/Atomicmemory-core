@@ -26,6 +26,13 @@ const STOP_WORDS = new Set([
 
 const QUOTED_PHRASE = /["“]([^"”]{2,80})["”]/g;
 const PROPER_NOUN_PHRASE = /\b([A-Z][\w.+-]*(?:\s+[A-Z][\w.+-]*){0,3})\b/g;
+// "aspects of <noun-phrase>" / "integrating <X>" / "implementing the <X>" — the
+// most common BEAM event-ordering question template. The captured phrase runs
+// up to a clause/preposition boundary so we get e.g. "the city autocomplete
+// feature" out of "different aspects of implementing the city autocomplete
+// feature across our conversations."
+const ASPECTS_OF_PATTERN = /\baspects of\s+(?:integrating\s+|implementing\s+|building\s+|customizing\s+|configuring\s+|developing\s+|handling\s+)?((?:the\s+|my\s+)?[a-z][\w-]*(?:\s+[a-z][\w-]+){0,5}?)(?=\s+(?:across|throughout|in\s+|during|over|to\s+|for\s+|since)\b|[.?!]|$)/i;
+const INTEGRATING_PATTERN = /\b(?:integrating|integrated|implementing|implemented|building|built|customizing|customized|configuring|configured|deploying|deployed|developing|developed|handling|handled)\s+((?:the\s+|my\s+)?[a-z][\w-]*(?:\s+[a-z][\w-]+){0,4}?)(?=\s+(?:across|throughout|in\s+|during|over|to\s+|for\s+|since|through)\b|[.?!]|$)/i;
 
 /**
  * Extract the most specific topic noun phrase from `query`, or null when
@@ -34,7 +41,8 @@ const PROPER_NOUN_PHRASE = /\b([A-Z][\w.+-]*(?:\s+[A-Z][\w.+-]*){0,3})\b/g;
  * Strategy (pure regex):
  *   1. quoted phrases ("...")    → strongest signal
  *   2. proper-noun runs          → e.g. "Bootstrap", "AWS Lambda"
- *   3. trailing non-stop content noun phrase
+ *   3. "aspects of <noun>" / "integrating <noun>" templates — the BEAM
+ *      event-ordering question shape, where the topic isn't capitalized.
  * Returns the longest non-stop-word candidate.
  */
 export function extractTopicNoun(query: string): string | null {
@@ -45,6 +53,7 @@ export function extractTopicNoun(query: string): string | null {
   const candidates: string[] = [];
   collectQuoted(trimmed, candidates);
   collectProperNouns(trimmed, candidates);
+  collectTemplateNouns(trimmed, candidates);
 
   const filtered = candidates
     .map((candidate) => candidate.trim())
@@ -69,6 +78,13 @@ function collectProperNouns(query: string, out: string[]): void {
   for (const match of stripped.matchAll(PROPER_NOUN_PHRASE)) {
     if (match[1]) out.push(match[1]);
   }
+}
+
+function collectTemplateNouns(query: string, out: string[]): void {
+  const aspectsMatch = query.match(ASPECTS_OF_PATTERN);
+  if (aspectsMatch?.[1]) out.push(aspectsMatch[1]);
+  const integratingMatch = query.match(INTEGRATING_PATTERN);
+  if (integratingMatch?.[1]) out.push(integratingMatch[1]);
 }
 
 function isAllStopWords(phrase: string): boolean {

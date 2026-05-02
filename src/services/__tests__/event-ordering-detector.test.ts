@@ -22,6 +22,12 @@ describe('isEventOrderingQuery', () => {
     )).toBe(true);
   });
 
+  it('detects "walk me through the order in which" queries (BEAM template)', () => {
+    expect(isEventOrderingQuery(
+      'Can you walk me through the order in which I brought up different aspects of my app development?',
+    )).toBe(true);
+  });
+
   it('detects "timeline" queries', () => {
     expect(isEventOrderingQuery('Give me a timeline of how my login feature evolved.')).toBe(true);
   });

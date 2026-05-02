@@ -14,6 +14,8 @@ const ORDERING_MARKERS = [
   'in chronological order',
   'chronological order',
   'in order',
+  'order in which',
+  'walk me through the order',
   'timeline',
   'sequence',
   'over time',

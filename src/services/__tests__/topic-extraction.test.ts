@@ -44,13 +44,26 @@ describe('extractTopicNoun', () => {
     expect(extractTopicNoun(null as unknown as string)).toBeNull();
   });
 
-  it('returns null when the topic is only common nouns (fail-closed)', () => {
-    // BEAM conv-2 city-autocomplete EO question — only common-noun phrases.
-    // The extractor relies on proper nouns or quoted phrases; for queries
-    // like this it correctly fails closed and the topic-aware stage skips,
-    // letting standard retrieval handle the query.
-    expect(extractTopicNoun(
-      'Can you list the order in which I brought up different aspects of implementing the city autocomplete feature?',
-    )).toBeNull();
+  it('extracts a common-noun topic from the "aspects of implementing X" BEAM template', () => {
+    const out = extractTopicNoun(
+      'Can you list the order in which I brought up different aspects of implementing the city autocomplete feature across our conversations?',
+    );
+    expect(out).not.toBeNull();
+    expect(out!.toLowerCase()).toContain('city autocomplete');
+  });
+
+  it('extracts a common-noun topic from the "aspects of integrating X" BEAM template', () => {
+    const out = extractTopicNoun(
+      'Can you list the order in which I brought up different aspects of integrating and customizing the framework in my projects?',
+    );
+    expect(out).not.toBeNull();
+  });
+
+  it('extracts a common-noun topic from "configured <X>" template (past tense)', () => {
+    const out = extractTopicNoun(
+      'List the order in which I configured the deployment pipeline through our conversations.',
+    );
+    expect(out).not.toBeNull();
+    expect(out!.toLowerCase()).toContain('deployment');
   });
 });
