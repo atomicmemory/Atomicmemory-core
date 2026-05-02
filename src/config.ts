@@ -155,6 +155,7 @@ export interface RuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  retrievalConfidenceTopKWindow: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -434,8 +435,9 @@ export const config: RuntimeConfig = {
   eventBoundaryRetrievalBoost: parseFloat(optionalEnv('EVENT_BOUNDARY_RETRIEVAL_BOOST') ?? '0.4'),
   retrievalConfidenceGateEnabled: (optionalEnv('RETRIEVAL_CONFIDENCE_GATE_ENABLED') ?? 'false') === 'true',
   retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.15'),
-  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.8'),
-  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.7'),
+  retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.85'),
+  retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.6'),
+  retrievalConfidenceTopKWindow: parseInt(optionalEnv('RETRIEVAL_CONFIDENCE_TOP_K_WINDOW') ?? '3', 10),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -591,6 +593,7 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   // Retrieval confidence gate (EXP-14)
   'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
   'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',
+  'retrievalConfidenceTopKWindow',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred

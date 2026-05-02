@@ -126,6 +126,7 @@ export interface CoreRuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  retrievalConfidenceTopKWindow: number;
   /** EXP-SUM: see RuntimeConfig.summaryDownweightFactor. */
   summaryDownweightFactor: number;
 }

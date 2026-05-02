@@ -103,6 +103,7 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'retrievalConfidenceMarginNormalizer'
   | 'retrievalConfidenceSimilarityNormalizer'
   | 'retrievalConfidenceFloor'
+  | 'retrievalConfidenceTopKWindow'
   | 'summaryDownweightFactor'
 >;
 /**
