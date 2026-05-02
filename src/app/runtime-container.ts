@@ -123,6 +123,8 @@ export interface CoreRuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  topicAwareRetrievalEnabled: boolean;
+  topicRetrievalK: number;
 }
 
 /** Repositories constructed by the runtime container. */

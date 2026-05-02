@@ -42,6 +42,8 @@ import { applyEventBoundaryBoost } from './event-boundary-ranking.js';
 import { protectLiteralListAnswerCandidates } from './literal-list-protection.js';
 import { applyTemporalQueryConstraints } from './temporal-query-constraints.js';
 import { computeRetrievalConfidence, type RetrievalConfidence } from './retrieval-confidence-gate.js';
+import { isEventOrderingQuery } from './event-ordering-detector.js';
+import { applyTopicAwareRetrieval } from './topic-aware-retrieval.js';
 
 const TEMPORAL_NEIGHBOR_WINDOW_MINUTES = 30;
 const SEMANTIC_RRF_WEIGHT = 1.2;
@@ -99,6 +101,8 @@ export type SearchPipelineRuntimeConfig = Pick<
   | 'retrievalConfidenceMarginNormalizer'
   | 'retrievalConfidenceSimilarityNormalizer'
   | 'retrievalConfidenceFloor'
+  | 'topicAwareRetrievalEnabled'
+  | 'topicRetrievalK'
 >;
 /**
  * Decide whether to auto-skip cross-encoder reranking.
@@ -281,7 +285,21 @@ export async function runSearchPipelineWithTrace(
     policyConfig,
   ));
 
-  const retrievalConfidence = computeRetrievalConfidence(selected, policyConfig);
+  // EXP-23: Topic-aware retrieval REPLACES the standard retrieval result for
+  // event-ordering queries when the flag is on. Placed AFTER MMR/reranking so
+  // the chronological order produced here is the order the LLM ultimately sees.
+  const topicAwareSelected = await applyTopicAwareRetrievalStage(
+    stores,
+    userId,
+    query,
+    selected,
+    sourceSite,
+    referenceTime,
+    trace,
+    policyConfig,
+  );
+
+  const retrievalConfidence = computeRetrievalConfidence(topicAwareSelected, policyConfig);
   if (retrievalConfidence?.lowConfidence) {
     trace.event('low-confidence-gate', {
       confidence: retrievalConfidence.confidence,
@@ -292,8 +310,8 @@ export async function runSearchPipelineWithTrace(
 
   const namespaceScope = options.namespaceScope ?? null;
   trace.setRetrievalSummary({
-    candidateIds: selected.map((result) => result.id),
-    candidateCount: selected.length,
+    candidateIds: topicAwareSelected.map((result) => result.id),
+    candidateCount: topicAwareSelected.length,
     queryText: repaired.queryText,
     skipRepair: options.skipRepairLoop ?? false,
   });
@@ -301,10 +319,53 @@ export async function runSearchPipelineWithTrace(
     trace.event('namespace-filtering', { scope: namespaceScope });
   }
   const filtered = namespaceScope
-    ? selected.filter((r) => isInScope(r.namespace, namespaceScope))
-    : selected;
+    ? topicAwareSelected.filter((r) => isInScope(r.namespace, namespaceScope))
+    : topicAwareSelected;
 
   return { filtered, trace, retrievalConfidence };
+}
+
+/**
+ * EXP-23 wrapper around `applyTopicAwareRetrieval` that handles the
+ * event-ordering gate, trace emission, and short-circuits when the flag
+ * is off so the rest of the pipeline behaves identically to before.
+ */
+async function applyTopicAwareRetrievalStage(
+  stores: SearchPipelineStores,
+  userId: string,
+  query: string,
+  selected: SearchResult[],
+  sourceSite: string | undefined,
+  referenceTime: Date | undefined,
+  trace: TraceCollector,
+  policyConfig: SearchPipelineRuntimeConfig,
+): Promise<SearchResult[]> {
+  if (!policyConfig.topicAwareRetrievalEnabled) return selected;
+  if (!isEventOrderingQuery(query)) return selected;
+
+  const result = await applyTopicAwareRetrieval(
+    { search: stores.search },
+    userId,
+    query,
+    selected,
+    {
+      topicAwareRetrievalEnabled: policyConfig.topicAwareRetrievalEnabled,
+      topicRetrievalK: policyConfig.topicRetrievalK,
+    },
+    sourceSite,
+    referenceTime,
+  );
+
+  if (!result.applied) {
+    trace.event('topic-aware-retrieval-skipped', { topic: result.topic });
+    return selected;
+  }
+  trace.stage('topic-aware-retrieval', result.results, {
+    topic: result.topic,
+    replaced: true,
+    k: policyConfig.topicRetrievalK,
+  });
+  return result.results;
 }
 
 async function runInitialRetrieval(

@@ -146,6 +146,10 @@ export interface RuntimeConfig {
   retrievalConfidenceMarginNormalizer: number;
   retrievalConfidenceSimilarityNormalizer: number;
   retrievalConfidenceFloor: number;
+  /** EXP-23: re-search by topic noun for event-ordering queries. */
+  topicAwareRetrievalEnabled: boolean;
+  /** EXP-23: top-K facts pulled by the topic-targeted re-search. */
+  topicRetrievalK: number;
   deferredAudnEnabled: boolean;
   deferredAudnBatchSize: number;
   compositeGroupingEnabled: boolean;
@@ -404,6 +408,8 @@ export const config: RuntimeConfig = {
   retrievalConfidenceMarginNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_MARGIN_NORMALIZER') ?? '0.05'),
   retrievalConfidenceSimilarityNormalizer: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_SIMILARITY_NORMALIZER') ?? '0.5'),
   retrievalConfidenceFloor: parseFloat(optionalEnv('RETRIEVAL_CONFIDENCE_FLOOR') ?? '0.3'),
+  topicAwareRetrievalEnabled: (optionalEnv('TOPIC_AWARE_RETRIEVAL_ENABLED') ?? 'false') === 'true',
+  topicRetrievalK: parseInt(optionalEnv('TOPIC_RETRIEVAL_K') ?? '30', 10),
   deferredAudnEnabled: (optionalEnv('DEFERRED_AUDN_ENABLED') ?? 'false') === 'true',
   deferredAudnBatchSize: parseInt(optionalEnv('DEFERRED_AUDN_BATCH_SIZE') ?? '20', 10),
   compositeGroupingEnabled: (optionalEnv('COMPOSITE_GROUPING_ENABLED') ?? 'true') === 'true',
@@ -554,6 +560,8 @@ export const INTERNAL_POLICY_CONFIG_FIELDS = [
   // Retrieval confidence gate (EXP-14)
   'retrievalConfidenceGateEnabled', 'retrievalConfidenceMarginNormalizer',
   'retrievalConfidenceSimilarityNormalizer', 'retrievalConfidenceFloor',
+  // Topic-aware retrieval (EXP-23)
+  'topicAwareRetrievalEnabled', 'topicRetrievalK',
   // Fast AUDN
   'fastAudnEnabled', 'fastAudnDuplicateThreshold',
   // Observation / deferred
