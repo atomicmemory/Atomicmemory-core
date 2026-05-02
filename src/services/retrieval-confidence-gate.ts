@@ -26,9 +26,15 @@ export interface RetrievalConfidenceConfig {
   retrievalConfidenceFloor: number;
 }
 
-const DEFAULT_MARGIN_NORMALIZER = 0.05;
-const DEFAULT_SIMILARITY_NORMALIZER = 0.5;
-const DEFAULT_CONFIDENCE_FLOOR = 0.3;
+// Fix A (2026-05-01): tightened from (0.05, 0.5, 0.3) to (0.15, 0.8, 0.7).
+// Old calibration saturated absConf at top-1 sim ≥ 0.5 and marginConf at 5¢
+// margin, so loosely-relevant clusters (e.g. 13 facts at sim 0.55-0.65 for an
+// off-topic ABS question) cleared the 0.3 floor at conf ≈0.88. New thresholds
+// require both stronger top-1 similarity AND meaningful separation before the
+// gate signals "high confidence," forcing abstention on Q1 ABS-1-style cases.
+const DEFAULT_MARGIN_NORMALIZER = 0.15;
+const DEFAULT_SIMILARITY_NORMALIZER = 0.8;
+const DEFAULT_CONFIDENCE_FLOOR = 0.7;
 const MARGIN_WEIGHT = 0.6;
 const ABSOLUTE_WEIGHT = 0.4;
 
