@@ -324,9 +324,17 @@ export async function extractFacts(
   conversationText: string,
   options: ExtractionOptions = {},
 ): Promise<ExtractedFact[]> {
+  // Phase 2 / H2b experiment (2026-05-03): swap to concept-faithful
+  // extraction (Mem0 "Concise but Complete" pattern, 15-80 word memories
+  // with verbatim-token preservation). Hypothesis: BEAM rubrics score on
+  // concept-level vocabulary that atomic-fact extraction strips. Toggle
+  // back via EXTRACTION_PROMPT_VARIANT=atomic env var if needed.
+  const { CONCEPT_FAITHFUL_EXTRACTION_PROMPT } = await import('./extraction-concept-faithful.js');
+  const variant = process.env.EXTRACTION_PROMPT_VARIANT ?? 'concept-faithful';
+  const activePrompt = variant === 'atomic' ? EXTRACTION_PROMPT : CONCEPT_FAITHFUL_EXTRACTION_PROMPT;
   const content = await timed('ingest.extract.llm', () => withCostStage('extract', () => llm.chat(
     [
-      { role: 'system', content: EXTRACTION_PROMPT },
+      { role: 'system', content: activePrompt },
       { role: 'user', content: buildExtractionUserMessage(conversationText, options) },
     ],
     { temperature: 0, jsonMode: true, maxTokens: EXTRACTION_MAX_TOKENS, seed: config.llmSeed ?? 42 },
