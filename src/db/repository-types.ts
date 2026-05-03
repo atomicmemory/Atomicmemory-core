@@ -163,6 +163,9 @@ export interface EpisodeRow {
 export interface SearchResult extends MemoryRow {
   similarity: number;
   score: number;
+  semantic_similarity?: number;
+  ranking_score?: number;
+  relevance?: number;
   matched_facts?: string[];
   matched_fact_ids?: string[];
   retrieval_layer?: 'memory' | 'atomic_fact';

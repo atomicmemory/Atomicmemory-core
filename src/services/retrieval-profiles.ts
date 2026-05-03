@@ -24,6 +24,13 @@ export interface RetrievalProfile {
   scoringWeightSimilarity: number;
   scoringWeightImportance: number;
   scoringWeightRecency: number;
+  /**
+   * Minimum semantic similarity required before importance/recency ranking
+   * boosts apply, and before direct simple/medium queries consider a candidate
+   * eligible for injection. Safe is stricter; quality keeps a little more
+   * recall for borderline matches.
+   */
+  rankingMinSimilarity: number;
   linkExpansionBeforeMMR: boolean;
   repairDeltaThreshold: number;
   repairConfidenceFloor: number;
@@ -50,6 +57,7 @@ const PROFILES: Record<RetrievalProfileName, RetrievalProfile> = {
     scoringWeightSimilarity: 2.0,
     scoringWeightImportance: 1.0,
     scoringWeightRecency: 1.0,
+    rankingMinSimilarity: 0.35,
     linkExpansionBeforeMMR: false,
     repairDeltaThreshold: 0,
     repairConfidenceFloor: 0,
@@ -74,6 +82,7 @@ const PROFILES: Record<RetrievalProfileName, RetrievalProfile> = {
     scoringWeightSimilarity: 2.0,
     scoringWeightImportance: 1.0,
     scoringWeightRecency: 1.0,
+    rankingMinSimilarity: 0.3,
     linkExpansionBeforeMMR: false,
     repairDeltaThreshold: 0,
     repairConfidenceFloor: 0,
@@ -98,6 +107,7 @@ const PROFILES: Record<RetrievalProfileName, RetrievalProfile> = {
     scoringWeightSimilarity: 2.0,
     scoringWeightImportance: 1.0,
     scoringWeightRecency: 1.0,
+    rankingMinSimilarity: 0.25,
     linkExpansionBeforeMMR: false,
     repairDeltaThreshold: 0,
     repairConfidenceFloor: 0,

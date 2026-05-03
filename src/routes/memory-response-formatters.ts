@@ -178,9 +178,31 @@ function formatRetrievalTrace(summary: RetrievalTraceSummary) {
     candidate_count: summary.candidateCount,
     query_text: summary.queryText,
     skip_repair: summary.skipRepair,
+    ...(summary.relevanceThreshold !== undefined ? { relevance_threshold: summary.relevanceThreshold } : {}),
+    ...(summary.relevanceFilterSource ? { relevance_filter_source: summary.relevanceFilterSource } : {}),
+    ...(summary.relevanceFilterReason ? { relevance_filter_reason: summary.relevanceFilterReason } : {}),
+    ...(summary.filteredCandidateIds ? { filtered_candidate_ids: summary.filteredCandidateIds } : {}),
+    ...(summary.filterDecisions ? {
+      filter_decisions: summary.filterDecisions.map(formatFilterDecision),
+    } : {}),
     ...(summary.traceId ? { trace_id: summary.traceId } : {}),
     ...(summary.stageCount !== undefined ? { stage_count: summary.stageCount } : {}),
     ...(summary.stageNames ? { stage_names: summary.stageNames } : {}),
+  };
+}
+
+function formatFilterDecision(decision: NonNullable<RetrievalTraceSummary['filterDecisions']>[number]) {
+  return {
+    id: decision.id,
+    source_site: decision.sourceSite,
+    source_kind: decision.sourceKind,
+    namespace: decision.namespace,
+    semantic_similarity: decision.semanticSimilarity,
+    ranking_score: decision.rankingScore,
+    relevance: decision.relevance,
+    threshold: decision.threshold,
+    decision: decision.decision,
+    reason: decision.reason,
   };
 }
 

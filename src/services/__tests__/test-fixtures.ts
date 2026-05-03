@@ -46,6 +46,35 @@ export function createSearchResult(overrides: Partial<SearchResult> = {}): Searc
   return { ...baseMemoryDefaults(), similarity: 0.8, score: 0.8, ...overrides };
 }
 
+/** Deterministic fixture for direct fact retrieval with noisy integrations. */
+export function createFavoriteColorNoisyRetrievalFixture() {
+  const answer = createSearchResult({
+    id: 'favorite-color-answer',
+    content: 'The user favorite color is teal.',
+    similarity: 0.91,
+    score: 0.91,
+    source_site: 'manual',
+    namespace: 'user/preferences',
+  });
+  const unrelatedFood = createNoiseMemory('unrelated-food-preference', 'The user likes spicy ramen.', 'manual');
+  const gmail = createNoiseMemory('integration-gmail-noise', 'Flight receipts mention seat 14C.', 'integration-google');
+  const drive = createNoiseMemory('integration-drive-noise', 'Quarterly planning doc mentions budget owners.', 'integration-drive');
+  const x = createNoiseMemory('integration-x-noise', 'A saved X post mentions CSS color palettes.', 'integration-x');
+  return { answer, unrelatedFood, gmail, drive, x, all: [answer, unrelatedFood, gmail, drive, x] };
+}
+
+function createNoiseMemory(id: string, content: string, sourceSite: string): SearchResult {
+  return createSearchResult({
+    id,
+    content,
+    similarity: 0.18,
+    score: 0.98,
+    importance: 1,
+    source_site: sourceSite,
+    namespace: `site/${sourceSite}`,
+  });
+}
+
 /** Build a fully typed MemoryRow with sane defaults. Override any field. */
 export function createMemoryRow(overrides: Partial<MemoryRow> = {}): MemoryRow {
   return { ...baseMemoryDefaults(), ...overrides };

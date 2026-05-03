@@ -2388,6 +2388,11 @@ paths:
                   type: boolean
                 source_site:
                   type: string
+                threshold:
+                  description: Optional normalized relevance threshold. Results below this semantic relevance floor are excluded before injection packaging.
+                  maximum: 1
+                  minimum: 0
+                  type: number
                 token_budget:
                   maximum: 50000
                   minimum: 100
@@ -2485,7 +2490,21 @@ paths:
                           additionalProperties: {}
                           description: Memory metadata persisted on the row, including caller-supplied verbatim metadata (set via /v1/memories/ingest/quick with skip_extraction=true) and core-generated metadata (e.g. cmo_id, memberMemoryIds, headline). Mirrors the shape /v1/memories/list and /v1/memories/:id return.
                           type: object
+                        ranking_score:
+                          description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
+                          type:
+                            - number
+                            - "null"
+                        relevance:
+                          description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
+                          type:
+                            - number
+                            - "null"
                         score:
+                          type:
+                            - number
+                            - "null"
+                        semantic_similarity:
                           type:
                             - number
                             - "null"
@@ -2584,8 +2603,69 @@ paths:
                             items:
                               type: string
                             type: array
+                          filter_decisions:
+                            description: Per-candidate threshold decisions emitted only when retrieval tracing is enabled. Entries include per-result source_site, source_kind, and namespace for debugging disclosure scope.
+                            items:
+                              properties:
+                                decision:
+                                  enum:
+                                    - kept
+                                    - filtered
+                                  type: string
+                                id:
+                                  type: string
+                                namespace:
+                                  type:
+                                    - string
+                                    - "null"
+                                ranking_score:
+                                  description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
+                                  type: number
+                                reason:
+                                  type: string
+                                relevance:
+                                  description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
+                                  type: number
+                                semantic_similarity:
+                                  type: number
+                                source_kind:
+                                  enum:
+                                    - integration
+                                    - local
+                                  type: string
+                                source_site:
+                                  type: string
+                                threshold:
+                                  type:
+                                    - number
+                                    - "null"
+                              required:
+                                - id
+                                - source_site
+                                - source_kind
+                                - namespace
+                                - semantic_similarity
+                                - ranking_score
+                                - relevance
+                                - threshold
+                                - decision
+                                - reason
+                              type: object
+                            type: array
+                          filtered_candidate_ids:
+                            items:
+                              type: string
+                            type: array
                           query_text:
                             type: string
+                          relevance_filter_reason:
+                            type: string
+                          relevance_filter_source:
+                            type: string
+                          relevance_threshold:
+                            type:
+                              - number
+                              - "null"
                           skip_repair:
                             type: boolean
                           stage_count:
@@ -2748,6 +2828,11 @@ paths:
                   type: boolean
                 source_site:
                   type: string
+                threshold:
+                  description: Optional normalized relevance threshold. Results below this semantic relevance floor are excluded before injection packaging.
+                  maximum: 1
+                  minimum: 0
+                  type: number
                 token_budget:
                   maximum: 50000
                   minimum: 100
@@ -2845,7 +2930,21 @@ paths:
                           additionalProperties: {}
                           description: Memory metadata persisted on the row, including caller-supplied verbatim metadata (set via /v1/memories/ingest/quick with skip_extraction=true) and core-generated metadata (e.g. cmo_id, memberMemoryIds, headline). Mirrors the shape /v1/memories/list and /v1/memories/:id return.
                           type: object
+                        ranking_score:
+                          description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
+                          type:
+                            - number
+                            - "null"
+                        relevance:
+                          description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
+                          type:
+                            - number
+                            - "null"
                         score:
+                          type:
+                            - number
+                            - "null"
+                        semantic_similarity:
                           type:
                             - number
                             - "null"
@@ -2944,8 +3043,69 @@ paths:
                             items:
                               type: string
                             type: array
+                          filter_decisions:
+                            description: Per-candidate threshold decisions emitted only when retrieval tracing is enabled. Entries include per-result source_site, source_kind, and namespace for debugging disclosure scope.
+                            items:
+                              properties:
+                                decision:
+                                  enum:
+                                    - kept
+                                    - filtered
+                                  type: string
+                                id:
+                                  type: string
+                                namespace:
+                                  type:
+                                    - string
+                                    - "null"
+                                ranking_score:
+                                  description: Composite ranking/debug score. It is not normalized and may be outside the [0,1] relevance range.
+                                  type: number
+                                reason:
+                                  type: string
+                                relevance:
+                                  description: Normalized relevance value used for threshold filtering; clamped to the [0,1] range.
+                                  type: number
+                                semantic_similarity:
+                                  type: number
+                                source_kind:
+                                  enum:
+                                    - integration
+                                    - local
+                                  type: string
+                                source_site:
+                                  type: string
+                                threshold:
+                                  type:
+                                    - number
+                                    - "null"
+                              required:
+                                - id
+                                - source_site
+                                - source_kind
+                                - namespace
+                                - semantic_similarity
+                                - ranking_score
+                                - relevance
+                                - threshold
+                                - decision
+                                - reason
+                              type: object
+                            type: array
+                          filtered_candidate_ids:
+                            items:
+                              type: string
+                            type: array
                           query_text:
                             type: string
+                          relevance_filter_reason:
+                            type: string
+                          relevance_filter_source:
+                            type: string
+                          relevance_threshold:
+                            type:
+                              - number
+                              - "null"
                           skip_repair:
                             type: boolean
                           stage_count:

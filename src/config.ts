@@ -240,6 +240,7 @@ const embeddingProvider = parseEmbeddingProvider(optionalEnv('EMBEDDING_PROVIDER
 const llmProvider = parseLlmProvider(optionalEnv('LLM_PROVIDER'), 'openai');
 const retrievalProfile = parseRetrievalProfile(optionalEnv('RETRIEVAL_PROFILE'));
 const retrievalProfileSettings = getRetrievalProfile(retrievalProfile);
+const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 
 /** Require OpenAI key only when at least one provider uses it. */
 const needsOpenAIKey = embeddingProvider === 'openai' || llmProvider === 'openai';
@@ -253,6 +254,16 @@ const anthropicApiKey = needsAnthropicKey ? requireEnv('ANTHROPIC_API_KEY') : op
 const googleApiKey = needsGoogleKey ? requireEnv('GOOGLE_API_KEY') : optionalEnv('GOOGLE_API_KEY');
 const voyageApiKey = needsVoyageKey ? requireEnv('VOYAGE_API_KEY') : optionalEnv('VOYAGE_API_KEY');
 
+function parseUnitNumberEnv(name: string, fallback: number): number {
+  const raw = optionalEnv(name);
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${name} must be a finite number between 0 and 1`);
+  }
+  return parsed;
+}
+
 export const config: RuntimeConfig = {
   databaseUrl: requireEnv('DATABASE_URL'),
   openaiApiKey,
@@ -260,7 +271,7 @@ export const config: RuntimeConfig = {
   retrievalProfile,
   retrievalProfileSettings,
   maxSearchResults: retrievalProfileSettings.maxSearchResults,
-  similarityThreshold: 0.3,
+  similarityThreshold: parseUnitNumberEnv('SIMILARITY_THRESHOLD', DEFAULT_SIMILARITY_THRESHOLD),
   audnCandidateThreshold: parseFloat(optionalEnv('AUDN_CANDIDATE_THRESHOLD') ?? '0.7'),
   audnSafeReuseMinSimilarity: parseFloat(optionalEnv('AUDN_SAFE_REUSE_MIN_SIMILARITY') ?? '0.95'),
   crossAgentCandidateThreshold: parseFloat(optionalEnv('CROSS_AGENT_CANDIDATE_THRESHOLD') ?? '0.75'),

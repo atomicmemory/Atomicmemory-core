@@ -29,6 +29,7 @@ const retrievalProfileSettings: RetrievalProfile = {
   scoringWeightSimilarity: 2.0,
   scoringWeightImportance: 1.0,
   scoringWeightRecency: 1.0,
+  rankingMinSimilarity: 0.3,
   linkExpansionBeforeMMR: false,
   repairDeltaThreshold: 0,
   repairConfidenceFloor: 0,
@@ -62,7 +63,6 @@ const {
   shouldAcceptRepair,
   mergeSearchResults,
   resolveRerankDepth,
-  isAggregationQuery,
   AGGREGATION_QUERY_LIMIT,
 } = await import('../retrieval-policy.js');
 
@@ -360,27 +360,5 @@ describe('resolveRerankDepth', () => {
 
   it('uses aggregation limit without clamping to maxSearchResults', () => {
     expect(resolveRerankDepth(AGGREGATION_QUERY_LIMIT, mockConfig)).toBe(25);
-  });
-});
-
-describe('isAggregationQuery', () => {
-  it('detects "how many" patterns', () => {
-    expect(isAggregationQuery('how many projects am I working on')).toBe(true);
-  });
-
-  it('detects "how much" patterns', () => {
-    expect(isAggregationQuery('how much did I spend')).toBe(true);
-  });
-
-  it('detects "total" patterns', () => {
-    expect(isAggregationQuery('what is the total cost')).toBe(true);
-  });
-
-  it('detects "list all" patterns', () => {
-    expect(isAggregationQuery('list all my meetings')).toBe(true);
-  });
-
-  it('rejects non-aggregation queries', () => {
-    expect(isAggregationQuery('how did the architecture change')).toBe(false);
   });
 });

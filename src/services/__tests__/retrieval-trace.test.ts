@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { TraceCollector } from '../retrieval-trace.js';
 import { config } from '../../config.js';
 import { createSearchResult } from './test-fixtures.js';
@@ -127,6 +128,56 @@ describe('TraceCollector', () => {
     const mem = stages[0].memories[0];
     expect(mem.similarity).toBe(0.1235);
     expect(mem.score).toBe(0.9877);
+  });
+
+  it('captures safe score semantics and source fields', () => {
+    config.retrievalTraceEnabled = true;
+    const trace = new TraceCollector('score semantics', 'user-4');
+    const results = [
+      createSearchResult({
+        id: 'integration-1',
+        content: 'Sensitive body is preview-limited.',
+        similarity: 0.23456,
+        semantic_similarity: 0.23456,
+        score: 0.98765,
+        ranking_score: 0.98765,
+        relevance: 0.23456,
+        importance: 0.8,
+        source_site: 'integration-google',
+        namespace: 'site/integration-google',
+      }),
+    ];
+
+    trace.stage('relevance-filter', results, {
+      decisions: [{
+        id: 'integration-1',
+        sourceSite: 'integration-google',
+        sourceKind: 'integration',
+        namespace: 'site/integration-google',
+        semanticSimilarity: 0.23456,
+        rankingScore: 0.98765,
+        relevance: 0.23456,
+        threshold: 0.5,
+        decision: 'filtered',
+        reason: 'integration-below-threshold',
+      }],
+    });
+    trace.finalize([]);
+
+    const output = getWrittenTrace();
+    const stages = output.stages as Array<{ memories: Array<Record<string, unknown>>; meta?: Record<string, unknown> }>;
+    expect(stages[0].memories[0]).toMatchObject({
+      id: 'integration-1',
+      semanticSimilarity: 0.2346,
+      rankingScore: 0.9877,
+      relevance: 0.2346,
+      importance: 0.8,
+      sourceSite: 'integration-google',
+      namespace: 'site/integration-google',
+    });
+    expect(stages[0].meta?.decisions).toEqual([
+      expect.objectContaining({ id: 'integration-1', reason: 'integration-below-threshold' }),
+    ]);
   });
 
   it('includes metadata in stage output', () => {

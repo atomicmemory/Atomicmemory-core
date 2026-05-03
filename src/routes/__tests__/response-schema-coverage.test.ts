@@ -16,7 +16,8 @@
  * first.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
 import type { Router } from 'express';
 import { createMemoryRouter } from '../memories';
 import { createAgentRouter } from '../agents';

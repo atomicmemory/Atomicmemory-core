@@ -84,7 +84,7 @@ describe('scopedSearch', () => {
 
   it('dispatches user scope with fast option to performFastSearch', async () => {
     await service.scopedSearch({ kind: 'user', userId: 'u1' }, 'query', { fast: true, sourceSite: 'test', limit: 10 });
-    expect(mockPerformFastSearch).toHaveBeenCalledWith(expect.anything(), 'u1', 'query', 'test', 10, undefined);
+    expect(mockPerformFastSearch).toHaveBeenCalledWith(expect.anything(), 'u1', 'query', 'test', 10, undefined, undefined);
     expect(mockPerformSearch).not.toHaveBeenCalled();
   });
 

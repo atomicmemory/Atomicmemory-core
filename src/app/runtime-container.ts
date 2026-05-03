@@ -111,6 +111,7 @@ export interface CoreRuntimeConfig {
   rerankSkipMinGap: number;
   rerankSkipTopSimilarity: number;
   retrievalProfileSettings: RetrievalProfile;
+  similarityThreshold: number;
   temporalQueryConstraintBoost: number;
   temporalQueryConstraintEnabled: boolean;
 }

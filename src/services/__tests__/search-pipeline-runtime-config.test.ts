@@ -28,6 +28,7 @@ const mockConfig = {
   retrievalProfileSettings: {
     repairPrimaryWeight: 1,
     repairRewriteWeight: 1,
+    rankingMinSimilarity: 0.3,
   },
 };
 
@@ -45,6 +46,15 @@ vi.mock('../retrieval-policy.js', () => ({
   resolveRerankDepth: vi.fn((limit: number) => limit),
   shouldRunRepairLoop: vi.fn(() => false),
   shouldAcceptRepair: vi.fn(),
+  applyRankingEligibility: vi.fn((_query: string, candidates: unknown[]) => ({
+    results: candidates,
+    decisions: [],
+    removedIds: [],
+    threshold: null,
+    reason: 'mocked',
+    queryLabel: 'simple',
+    triggered: false,
+  })),
 }));
 vi.mock('../query-expansion.js', () => ({
   expandQueryViaEntities: vi.fn(),
@@ -197,6 +207,32 @@ describe('runSearchPipelineWithTrace runtime config', () => {
       'cross-encoder', rerankedResults,
       { model: 'runtime-cross-encoder', dtype: 'fp16' },
     );
+  });
+
+  it('does not auto-skip reranking for boost-heavy results with low semantic similarity', async () => {
+    const initialResults = [
+      createSearchResult({
+        id: 'memory-1',
+        score: 1.2,
+        similarity: 0.4,
+        semantic_similarity: 0.4,
+      }),
+      createSearchResult({
+        id: 'memory-2',
+        score: 1.0,
+        similarity: 0.34,
+        semantic_similarity: 0.34,
+      }),
+    ];
+    mockRerankCandidates.mockResolvedValue(initialResults);
+
+    await runSearchPipelineWithTrace(
+      createStores(initialResults), 'user-1', 'low semantic similarity query', 2,
+      undefined, undefined,
+      { runtimeConfig: { ...mockConfig, crossEncoderEnabled: true } as any },
+    );
+
+    expect(mockRerankCandidates).toHaveBeenCalledOnce();
   });
 
   it('uses runtime config to enable link generation even when module config disables it', async () => {

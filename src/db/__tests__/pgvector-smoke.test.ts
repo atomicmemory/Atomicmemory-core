@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createMemoryTestContext } from './test-fixtures.js';
 import { pool } from '../pool.js';
 import { unitVector } from './test-fixtures.js';
+import { config } from '../../config.js';
 
 const TEST_USER = 'test-user-1';
 
@@ -15,6 +16,15 @@ function similarTo(base: number[], noise: number): number[] {
   const vec = base.map((v) => v + (Math.random() - 0.5) * noise);
   const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
   return vec.map((v) => v / norm);
+}
+
+function vectorWithCosine(base: number[], cosine: number): number[] {
+  const axisIndex = Math.abs(base[0]) < 0.9 ? 0 : 1;
+  const orthogonal = base.map((value, index) => (index === axisIndex ? 1 : 0) - base[axisIndex] * value);
+  const orthogonalNorm = Math.sqrt(orthogonal.reduce((sum, value) => sum + value * value, 0));
+  const orthogonalUnit = orthogonal.map((value) => value / orthogonalNorm);
+  const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+  return base.map((value, index) => cosine * value + sine * orthogonalUnit[index]);
 }
 
 describe('pgvector smoke test', () => {
@@ -49,6 +59,115 @@ describe('pgvector smoke test', () => {
     expect(results.length).toBe(2);
     expect(results[0].content).toBe('similar to query');
     expect(results[0].score).toBeGreaterThan(results[1].score);
+  });
+
+  it('does not let high importance rescue a sub-floor vector match', async () => {
+    const originalRankingMin = config.retrievalProfileSettings.rankingMinSimilarity;
+    config.retrievalProfileSettings.rankingMinSimilarity = 0.3;
+    try {
+      const queryVec = unitVector(123);
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'semantic match with low importance',
+        embedding: vectorWithCosine(queryVec, 0.35),
+        importance: 0,
+        sourceSite: 'test',
+      });
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'important unrelated note',
+        embedding: vectorWithCosine(queryVec, 0.2),
+        importance: 1,
+        sourceSite: 'test',
+      });
+
+      const results = await repo.searchSimilar(TEST_USER, queryVec, 5);
+      const semanticMatch = results.find((result) => result.content === 'semantic match with low importance');
+      const noisyMatch = results.find((result) => result.content === 'important unrelated note');
+
+      expect(semanticMatch).toBeDefined();
+      expect(noisyMatch).toBeDefined();
+      expect(results[0].content).toBe('semantic match with low importance');
+      const noisyRankingScore = noisyMatch!.ranking_score ?? Number.NaN;
+      const semanticRankingScore = semanticMatch!.ranking_score ?? Number.NaN;
+      expect(noisyMatch!.similarity).toBeLessThan(0.3);
+      expect(noisyMatch!.score).toBeGreaterThan(noisyRankingScore);
+      expect(noisyRankingScore).toBeCloseTo(config.scoringWeightSimilarity * noisyMatch!.similarity, 5);
+      expect(semanticRankingScore).toBeGreaterThan(noisyRankingScore);
+      expect(noisyMatch!.semantic_similarity).toBeCloseTo(noisyMatch!.similarity, 5);
+      expect(noisyMatch!.relevance).toBeCloseTo(noisyMatch!.similarity, 5);
+    } finally {
+      config.retrievalProfileSettings.rankingMinSimilarity = originalRankingMin;
+    }
+  });
+
+  it('populates distinct score semantics for hybrid search', async () => {
+    const originalRankingMin = config.retrievalProfileSettings.rankingMinSimilarity;
+    config.retrievalProfileSettings.rankingMinSimilarity = 0.3;
+    try {
+      const queryVec = unitVector(456);
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'hybrid semantic match with low importance',
+        embedding: vectorWithCosine(queryVec, 0.35),
+        importance: 0,
+        sourceSite: 'test',
+      });
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'hybrid important unrelated note',
+        embedding: vectorWithCosine(queryVec, 0.2),
+        importance: 1,
+        sourceSite: 'test',
+      });
+
+      const results = await repo.searchHybrid(TEST_USER, 'hybrid note', queryVec, 5);
+      const noisyMatch = results.find((result) => result.content === 'hybrid important unrelated note');
+
+      expect(noisyMatch).toBeDefined();
+      expect(noisyMatch!.score).toBeGreaterThan(noisyMatch!.ranking_score ?? Number.NaN);
+      expect(noisyMatch!.semantic_similarity).toBeCloseTo(noisyMatch!.similarity, 5);
+      expect(noisyMatch!.relevance).toBeCloseTo(noisyMatch!.similarity, 5);
+    } finally {
+      config.retrievalProfileSettings.rankingMinSimilarity = originalRankingMin;
+    }
+  });
+
+  it('populates distinct score semantics for workspace search', async () => {
+    const originalRankingMin = config.retrievalProfileSettings.rankingMinSimilarity;
+    config.retrievalProfileSettings.rankingMinSimilarity = 0.3;
+    try {
+      const queryVec = unitVector(789);
+      const workspaceId = '00000000-0000-4000-8000-000000000789';
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'workspace semantic match with low importance',
+        embedding: vectorWithCosine(queryVec, 0.35),
+        importance: 0,
+        sourceSite: 'test',
+        workspaceId,
+      });
+      await repo.storeMemory({
+        userId: TEST_USER,
+        content: 'workspace important unrelated note',
+        embedding: vectorWithCosine(queryVec, 0.2),
+        importance: 1,
+        sourceSite: 'test',
+        workspaceId,
+      });
+
+      const results = await repo.searchSimilarInWorkspace(workspaceId, queryVec, 5);
+      const semanticMatch = results.find((result) => result.content === 'workspace semantic match with low importance');
+      const noisyMatch = results.find((result) => result.content === 'workspace important unrelated note');
+
+      expect(results[0].content).toBe('workspace semantic match with low importance');
+      expect(semanticMatch?.ranking_score).toBeGreaterThan(noisyMatch?.ranking_score ?? Number.NaN);
+      expect(noisyMatch!.score).toBeGreaterThan(noisyMatch!.ranking_score ?? Number.NaN);
+      expect(noisyMatch!.semantic_similarity).toBeCloseTo(noisyMatch!.similarity, 5);
+      expect(noisyMatch!.relevance).toBeCloseTo(noisyMatch!.similarity, 5);
+    } finally {
+      config.retrievalProfileSettings.rankingMinSimilarity = originalRankingMin;
+    }
   });
 
   it('isolates memories by user_id', async () => {
