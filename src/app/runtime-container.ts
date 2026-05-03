@@ -24,6 +24,8 @@ import { LinkRepository } from '../db/link-repository.js';
 import { MemoryRepository } from '../db/memory-repository.js';
 import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
+import { ObservationRepository } from '../db/repository-observation.js';
+import { ObservationService } from '../services/observation-service.js';
 import type { CoreStores } from '../db/stores.js';
 import { PgMemoryStore } from '../db/pg-memory-store.js';
 import { PgEpisodeStore } from '../db/pg-episode-store.js';
@@ -211,12 +213,19 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     pool,
   };
 
+  // Observation network (Hindsight Tempr-inspired): per-entity profile
+  // synthesis. Marked dirty during ingest when entity-graph is enabled;
+  // flushed via POST /v1/memories/observations/regenerate. Lifts SUM by
+  // surfacing verbatim-token-preserving entity profiles at retrieval time.
+  const observationRepo = new ObservationRepository(pool);
+  const observationService = new ObservationService(observationRepo, memory);
+
   const service = new MemoryService(
     memory,
     claims,
     entities ?? undefined,
     lessons ?? undefined,
-    undefined,
+    observationService,
     runtimeConfig,
     stores,
   );

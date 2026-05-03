@@ -243,6 +243,10 @@ export const ConsolidateResponseSchema = z.union([
   ConsolidateExecuteResponseSchema,
 ]).openapi({ description: 'Consolidation result — scan or execute.' });
 
+export const ObservationsRegenerateResponseSchema = z.object({
+  processed: z.number(),
+}).openapi({ description: 'Observation regeneration result — count of subjects processed.' });
+
 export const DecayResponseSchema = z.object({
   memories_evaluated: z.number(),
   candidates_for_archival: z.array(DecayCandidateSchema),

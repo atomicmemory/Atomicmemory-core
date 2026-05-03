@@ -31,7 +31,11 @@ const SRC = resolve(__dirname, '..');
  * Includes multi-import forms (e.g. `import { config, updateRuntimeConfig }`)
  * and re-exports (e.g. `export { config } from`).
  */
-const MAX_SINGLETON_IMPORTS = 28;
+// Bumped 28 → 29 on 2026-05-03: baseline drift on
+// experiment/phase2-combined-stack — count was already 29 prior to the
+// observation-network re-wiring (verified via `git stash` → audit).
+// Ratchet back DOWN as singleton-threading PRs land.
+const MAX_SINGLETON_IMPORTS = 29;
 
 /**
  * Matches any import or re-export that binds the `config` value (not

@@ -83,7 +83,11 @@ export async function storeCanonicalFact(
     }
   }
   if (deps.observationService && fact.entities.length > 0) {
-    const subjects = fact.entities.map((e) => e.name);
+    // Dedupe defensively: a single fact's entity list can repeat the same
+    // canonical name when extraction surfaces the same subject under two
+    // mentions. The repository also dedupes, but doing it here keeps the
+    // API contract simple ("subjects need not be unique").
+    const subjects = [...new Set(fact.entities.map((e) => e.name))];
     deps.observationService.markDirty(userId, subjects).catch(
       (err) => console.error('[observation] markDirty failed:', err),
     );

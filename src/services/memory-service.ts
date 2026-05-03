@@ -194,6 +194,28 @@ export class MemoryService {
   async reportLesson(userId: string, pattern: string, sourceMemoryIds: string[], severity?: 'low' | 'medium' | 'high' | 'critical') { return crud.reportLesson(this.deps, userId, pattern, sourceMemoryIds, severity); }
   async deactivateLesson(userId: string, lessonId: string) { return crud.deactivateLesson(this.deps, userId, lessonId); }
 
+  // --- Observation network ---
+
+  /**
+   * Drain the observation_dirty queue: synthesize per-entity profiles via
+   * LLM and store them as network='observation' memories. Returns the total
+   * number of subjects processed across all batches.
+   *
+   * Called from the regenerate route. Loops in batches because each LLM
+   * call is several seconds; the route would otherwise time out.
+   */
+  async regenerateObservations(maxIterations: number = 100, batchSize: number = 25): Promise<number> {
+    const obs = this.deps.observationService;
+    if (!obs) return 0;
+    let total = 0;
+    for (let i = 0; i < maxIterations; i++) {
+      const n = await obs.regeneratePending(batchSize);
+      total += n;
+      if (n === 0) break;
+    }
+    return total;
+  }
+
   // NOTE: Do NOT add multi-query search. Tested and caused 0-retrieval failures
   // due to embedding API rate limits with 4x calls per query.
 }

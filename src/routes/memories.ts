@@ -142,6 +142,7 @@ export function createMemoryRouter(
   registerStatsRoute(router, service);
   registerHealthRoute(router, configRouteAdapter);
   registerConfigRoute(router, configRouteAdapter);
+  registerObservationsRegenerateRoute(router, service);
   registerConsolidateRoute(router, service);
   registerDecayRoute(router, service);
   registerCapRoute(router, service);
@@ -412,6 +413,17 @@ function registerConfigRoute(router: Router, configRouteAdapter: RuntimeConfigRo
       });
     } catch (err) {
       handleRouteError(res, 'PUT /v1/memories/config', err);
+    }
+  });
+}
+
+function registerObservationsRegenerateRoute(router: Router, service: MemoryService): void {
+  router.post('/observations/regenerate', async (_req: Request, res: Response) => {
+    try {
+      const processed = await service.regenerateObservations();
+      res.json({ processed });
+    } catch (err) {
+      handleRouteError(res, 'POST /v1/memories/observations/regenerate', err);
     }
   });
 }

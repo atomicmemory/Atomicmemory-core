@@ -9,14 +9,24 @@ import pg from 'pg';
 export class ObservationRepository {
   constructor(private pool: pg.Pool) {}
 
-  /** Mark entity subjects as needing observation regeneration. Idempotent. */
+  /**
+   * Mark entity subjects as needing observation regeneration. Idempotent.
+   *
+   * Dedupes subjects within a single call: Postgres rejects ON CONFLICT
+   * DO UPDATE when the same constrained tuple appears twice in one VALUES
+   * list ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+   * A single ingest batch can yield duplicate entity names when one fact
+   * mentions the same entity multiple times — failing closed there breaks
+   * the whole batch. Dedupe here makes the API robust to that input shape.
+   */
   async markDirty(userId: string, subjects: string[]): Promise<void> {
-    if (subjects.length === 0) return;
-    const values = subjects.map((_, i) => `($1, $${i + 2}, NOW())`).join(', ');
+    const unique = [...new Set(subjects)];
+    if (unique.length === 0) return;
+    const values = unique.map((_, i) => `($1, $${i + 2}, NOW())`).join(', ');
     await this.pool.query(
       `INSERT INTO observation_dirty (user_id, subject, marked_at) VALUES ${values}
        ON CONFLICT (user_id, subject) DO UPDATE SET marked_at = NOW()`,
-      [userId, ...subjects],
+      [userId, ...unique],
     );
   }
 

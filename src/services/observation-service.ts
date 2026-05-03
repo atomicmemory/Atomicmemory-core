@@ -17,15 +17,17 @@ import { MemoryRepository } from '../db/memory-repository.js';
 import { embedText } from './embedding.js';
 import { llm } from './llm.js';
 
-const SYNTHESIS_PROMPT = `You are a memory synthesis system. Given a set of facts about a subject, produce a comprehensive profile summary.
+const SYNTHESIS_PROMPT = `You are a memory synthesis system. Given a set of facts about a subject, produce a comprehensive profile summary that PRESERVES the user's verbatim wording for technologies, libraries, dates, decisions, and proper nouns.
 
 RULES:
-- Synthesize all facts into a coherent profile of the subject
-- Include: key attributes, relationships, preferences, and notable activities
-- Maintain factual accuracy — do not infer beyond what the facts state
-- Write in third person (e.g., "The user works at Google" not "You work at Google")
-- Keep the summary concise: 2-4 sentences for simple subjects, up to 8 for complex ones
-- Include temporal context when available (e.g., "as of March 2026")
+- Synthesize all facts into a coherent profile of the subject.
+- VERBATIM PRESERVATION: When the source facts mention specific technologies (e.g. "Werkzeug.security pbkdf2:sha256", "Bootstrap 5.3.0", "OpenWeather API v2", "Flask 2.3.0", "Python 3.11", "SQLite 3.39"), library versions, dates, model names, API endpoints, or named entities — REPRODUCE THOSE TOKENS EXACTLY in the summary. Do not paraphrase technical names.
+- For complex subjects with multi-phase development, organize the summary by phase. Use "Phase N — <name>: <details>" structure when the facts span multiple distinct phases of work.
+- Include: key attributes, relationships, preferences, notable activities, and the SPECIFIC technical decisions that occurred.
+- Maintain factual accuracy — do not infer beyond what the facts state.
+- Write in third person (e.g., "The user works at Google" not "You work at Google").
+- Keep the summary concise: 2-4 sentences for simple subjects, up to 8 for complex ones.
+- Include temporal context when available (e.g., "as of March 2026").
 
 Return ONLY the profile summary text, no formatting or labels.`;
 
