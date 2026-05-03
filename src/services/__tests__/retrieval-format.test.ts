@@ -244,6 +244,29 @@ describe('formatTieredInjection', () => {
     expect(result).toContain('Repeated event endpoints:');
     expect(result).toContain('elapsed between endpoints: ~3 months (83 days)');
   });
+
+  it('suppresses the generic timeline summary when query-aware temporal evidence is present', () => {
+    const memories = [
+      makeResult({ id: 'first', content: 'Avery completed the first maintenance appointment.', created_at: new Date('2023-05-24T00:00:00Z') }),
+      makeResult({ id: 'second', content: 'Avery completed a second maintenance appointment.', created_at: new Date('2023-08-15T00:00:00Z') }),
+      makeResult({ id: 'plan', content: 'Avery planned to schedule another maintenance appointment in January.', created_at: new Date('2024-01-10T00:00:00Z') }),
+    ];
+    const assignments = [
+      { memoryId: 'first', tier: 'L2' as const, estimatedTokens: 5 },
+      { memoryId: 'second', tier: 'L2' as const, estimatedTokens: 5 },
+      { memoryId: 'plan', tier: 'L2' as const, estimatedTokens: 5 },
+    ];
+    const result = formatTieredInjection(
+      memories,
+      assignments,
+      "How many months lapsed between Avery's first and second maintenance appointment?",
+    );
+
+    expect(result).toContain('Repeated event endpoints:');
+    expect(result).not.toContain('Timeline:');
+    expect(result).not.toContain('Key temporal evidence:');
+    expect(result).not.toContain('2024-01-10 →');
+  });
 });
 
 describe('formatSimpleInjection', () => {
@@ -301,7 +324,7 @@ describe('formatSimpleInjection', () => {
 });
 
 describe('buildInjection query-term visibility', () => {
-  it('promotes a compressed memory when L0 hides an exact query term', () => {
+  it('keeps the exact query term visible in the final temporal injection', () => {
     const result = buildInjection([
       makeResult({
         id: 'workshop',
@@ -312,8 +335,8 @@ describe('buildInjection query-term visibility', () => {
       }),
     ], 'What workshop did Caroline attend recently?', 'tiered', 35);
 
-    expect(result.injectionText).toContain('[L1]');
     expect(result.injectionText).toContain('workshop');
+    expect(result.injectionText).toContain('Temporal evidence candidates:');
   });
 });
 
