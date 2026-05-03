@@ -357,12 +357,19 @@ describe('normalizeExtractedRelations', () => {
 });
 
 describe('EXTRACTION_PROMPT — assistant-turn extraction directives', () => {
-  it('instructs to extract factual content from assistant responses', () => {
-    expect(EXTRACTION_PROMPT).toContain('DO extract specific factual content from assistant responses');
+  it('promotes agent-facts to first-class (Phase 1b, Mem0 pattern)', () => {
+    expect(EXTRACTION_PROMPT).toContain('AGENT-FACTS ARE FIRST-CLASS');
+    expect(EXTRACTION_PROMPT).toContain('DO NOT skip substantive assistant content');
   });
 
-  it('instructs to skip generic assistant chatter', () => {
-    expect(EXTRACTION_PROMPT).toContain('Skip generic assistant chatter');
+  it('still instructs to skip ONLY truly generic assistant chatter', () => {
+    expect(EXTRACTION_PROMPT).toContain('Skip ONLY truly generic assistant chatter');
+  });
+
+  it('lists concrete agent-fact prefixes for retrieval indexing', () => {
+    expect(EXTRACTION_PROMPT).toContain('Assistant confirmed:');
+    expect(EXTRACTION_PROMPT).toContain('Assistant recommended:');
+    expect(EXTRACTION_PROMPT).toContain('Assistant computed:');
   });
 
   it('does NOT contain the old blanket skip-assistant instruction', () => {

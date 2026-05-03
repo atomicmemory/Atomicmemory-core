@@ -289,6 +289,13 @@ export interface IngestRuntimeConfig {
   entropyGateThreshold: number;
   fastAudnDuplicateThreshold: number;
   fastAudnEnabled: boolean;
+  /**
+   * Phase 1 (Mem0-pattern) ADD-only switch — when true, the slow LLM
+   * mutation-decision path in memory-audn is bypassed; every fact that's
+   * not a fast-AUDN near-duplicate NOOP is stored as ADD. Defers state-
+   * change semantics to retrieval-time.
+   */
+  audnLlmDisabled: boolean;
   ingestTraceEnabled: boolean;
   lessonsEnabled: boolean;
   llmModel: string;

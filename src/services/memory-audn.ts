@@ -97,6 +97,25 @@ export async function resolveAndExecuteAudn(
     };
   }
 
+  // ADD-only mode (Phase 1, 2026-05-03): when audnLlmDisabled, short-circuit
+  // the slow LLM mutation-decision path and always ADD. This is the
+  // architectural move Mem0 made — defer state-change semantics to retrieval
+  // time. Eliminates 30s timeouts (no LLM call to time out), preserves
+  // history (no UPDATE/DELETE that destroys information), and roughly halves
+  // ingest latency. Per Mem0's own description: "the new algorithm collapses
+  // extraction into a single LLM call that only adds. Every extracted fact
+  // becomes an independent record."
+  if (deps.config.audnLlmDisabled) {
+    const addDecision: AUDNDecision = {
+      action: 'ADD',
+      targetMemoryId: null,
+      updatedContent: null,
+      clarificationNote: null,
+      contradictionConfidence: null,
+    };
+    return executeAndTrackSupersede(deps, addDecision, candidateIds, ctx, supersededTargets, requireTraceContext(traceContext), 'llm-audn', 'ADD', 'ADD');
+  }
+
   const rawDecision = await timed('ingest.fact.audn', () => cachedResolveAUDN(fact.fact, filteredCandidates));
   let decision = applyClarificationOverrides(rawDecision, fact.fact, filteredCandidates, fact.keywords, fact.type);
   if (deps.config.entityGraphEnabled && deps.stores.entity) {
