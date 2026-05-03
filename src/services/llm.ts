@@ -31,6 +31,8 @@ export interface LLMConfig extends WriteCostEventConfig {
   openaiApiKey: string;
   groqApiKey?: string;
   anthropicApiKey?: string;
+  /** Per-call timeout (ms) for the Anthropic chat API. Default 30000. */
+  anthropicLlmTimeoutMs: number;
   googleApiKey?: string;
   ollamaBaseUrl: string;
   llmSeed?: number;
@@ -237,12 +239,21 @@ class AnthropicLLM implements LLMProvider {
       .filter((m) => m.role !== 'system')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
+    // AUDN-hang fix (2026-05-03): without an explicit timeout, AUDN
+    // mutation-decision LLM calls can hang for 5–15 minutes on certain
+    // facts. Anthropic SDK respects AbortSignal via the second-arg
+    // request options object. Wrap each call in a fresh AbortSignal
+    // to bound wall-time. retryOnRateLimit will see the timeout abort
+    // as a regular error and not retry it (correct behavior — timeouts
+    // should propagate, not get retried into another timeout).
     const request = () => this.client.messages.create({
       model: this.model,
       max_tokens: options.maxTokens ?? 1024,
       temperature: options.temperature ?? 0,
       ...(systemMsg ? { system: systemMsg.content } : {}),
       messages: nonSystemMsgs,
+    }, {
+      signal: AbortSignal.timeout(config.anthropicLlmTimeoutMs),
     });
     const started = performance.now();
     const response = await retryOnRateLimit(request);

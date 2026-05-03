@@ -153,6 +153,14 @@ export interface RuntimeConfig {
   compositeMaxClusterSize: number;
   compositeSimilarityThreshold: number;
   anthropicApiKey?: string;
+  /**
+   * Per-call timeout (ms) for the Anthropic chat API. Default 30000.
+   * Without this, AUDN-LLM calls can hang for 5–15 minutes on certain
+   * facts (observed in BEAM ingest 2026-05-03), making fresh-ingest
+   * multirun impractical. The Anthropic SDK accepts `signal` via
+   * AbortSignal.timeout — we wire it through here.
+   */
+  anthropicLlmTimeoutMs: number;
   googleApiKey?: string;
   costLoggingEnabled: boolean;
   costLogDir: string;
@@ -327,6 +335,7 @@ export const config: RuntimeConfig = {
   // Groq
   groqApiKey: groqApiKey ?? undefined,
   anthropicApiKey: anthropicApiKey ?? undefined,
+  anthropicLlmTimeoutMs: parseInt(optionalEnv('ANTHROPIC_LLM_TIMEOUT_MS') ?? '30000', 10),
   googleApiKey: googleApiKey ?? undefined,
 
   // Ollama
@@ -469,7 +478,7 @@ export const SUPPORTED_RUNTIME_CONFIG_FIELDS = [
   'embeddingApiUrl', 'embeddingApiKey',
   'voyageApiKey', 'voyageDocumentModel', 'voyageQueryModel',
   'llmProvider', 'llmModel', 'llmApiUrl', 'llmApiKey',
-  'groqApiKey', 'anthropicApiKey', 'googleApiKey',
+  'groqApiKey', 'anthropicApiKey', 'anthropicLlmTimeoutMs', 'googleApiKey',
   'ollamaBaseUrl', 'vectorBackend', 'skipVectorIndexes', 'llmSeed',
   'crossEncoderModel', 'crossEncoderDtype',
   // Operator-visible runtime

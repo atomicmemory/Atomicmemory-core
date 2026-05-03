@@ -13,6 +13,7 @@ const baseConfig: LLMConfig = {
   llmModel: 'gpt-4o-mini',
   openaiApiKey: 'test-openai-key',
   anthropicApiKey: 'test-anthropic-key',
+  anthropicLlmTimeoutMs: 30000,
   googleApiKey: 'test-google-key',
   groqApiKey: 'test-groq-key',
   llmApiUrl: undefined,
