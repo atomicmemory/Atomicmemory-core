@@ -331,14 +331,17 @@ export async function extractFacts(
   conversationText: string,
   options: ExtractionOptions = {},
 ): Promise<ExtractedFact[]> {
-  // Phase 2 / H2b experiment (2026-05-03): swap to concept-faithful
-  // extraction (Mem0 "Concise but Complete" pattern, 15-80 word memories
-  // with verbatim-token preservation). Hypothesis: BEAM rubrics score on
-  // concept-level vocabulary that atomic-fact extraction strips. Toggle
-  // back via EXTRACTION_PROMPT_VARIANT=atomic env var if needed.
+  // Phase 2 / H2b finding (2026-05-03): the concept-faithful prompt
+  // produces raw conversation excerpts on Haiku, not synthesized memories
+  // (mean 14 words, samples show literal user/assistant utterances copied
+  // verbatim). Reverting to atomic as default. Concept-faithful remains
+  // available behind EXTRACTION_PROMPT_VARIANT=concept-faithful for
+  // controlled experiments. The Mem0-pattern win comes from ADD-only
+  // (AUDN_LLM_DISABLED=true), not from changing extraction granularity
+  // alone — see Phase 1 in 2026-05-03-deep-state-analysis.md.
   const { CONCEPT_FAITHFUL_EXTRACTION_PROMPT } = await import('./extraction-concept-faithful.js');
-  const variant = process.env.EXTRACTION_PROMPT_VARIANT ?? 'concept-faithful';
-  const activePrompt = variant === 'atomic' ? EXTRACTION_PROMPT : CONCEPT_FAITHFUL_EXTRACTION_PROMPT;
+  const variant = process.env.EXTRACTION_PROMPT_VARIANT ?? 'atomic';
+  const activePrompt = variant === 'concept-faithful' ? CONCEPT_FAITHFUL_EXTRACTION_PROMPT : EXTRACTION_PROMPT;
   const content = await timed('ingest.extract.llm', () => withCostStage('extract', () => llm.chat(
     [
       { role: 'system', content: activePrompt },
