@@ -99,10 +99,15 @@ function shouldAutoSkipReranking(
   policyConfig: Pick<SearchPipelineRuntimeConfig, 'rerankSkipTopSimilarity' | 'rerankSkipMinGap'> = config,
 ): boolean {
   if (results.length < 2) return true;
-  const topSim = results[0]?.score ?? 0;
-  const secondSim = results[1]?.score ?? 0;
+  const topSim = readNormalizedSimilarity(results[0]);
+  const secondSim = readNormalizedSimilarity(results[1]);
   return topSim >= policyConfig.rerankSkipTopSimilarity
     && (topSim - secondSim) >= policyConfig.rerankSkipMinGap;
+}
+
+function readNormalizedSimilarity(result: SearchResult | undefined): number {
+  const similarity = result?.semantic_similarity ?? result?.similarity ?? 0;
+  return Number.isFinite(similarity) ? similarity : 0;
 }
 
 export interface SearchPipelineOptions {

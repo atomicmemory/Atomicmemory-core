@@ -209,6 +209,32 @@ describe('runSearchPipelineWithTrace runtime config', () => {
     );
   });
 
+  it('does not auto-skip reranking for boost-heavy results with low semantic similarity', async () => {
+    const initialResults = [
+      createSearchResult({
+        id: 'memory-1',
+        score: 1.2,
+        similarity: 0.4,
+        semantic_similarity: 0.4,
+      }),
+      createSearchResult({
+        id: 'memory-2',
+        score: 1.0,
+        similarity: 0.34,
+        semantic_similarity: 0.34,
+      }),
+    ];
+    mockRerankCandidates.mockResolvedValue(initialResults);
+
+    await runSearchPipelineWithTrace(
+      createStores(initialResults), 'user-1', 'low semantic similarity query', 2,
+      undefined, undefined,
+      { runtimeConfig: { ...mockConfig, crossEncoderEnabled: true } as any },
+    );
+
+    expect(mockRerankCandidates).toHaveBeenCalledOnce();
+  });
+
   it('uses runtime config to enable link generation even when module config disables it', async () => {
     mockConfig.linkExpansionEnabled = false;
     const linkStores = {
