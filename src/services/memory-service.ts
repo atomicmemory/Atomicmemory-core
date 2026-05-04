@@ -40,6 +40,7 @@ export class MemoryService {
     observationService?: ObservationService,
     runtimeConfig?: MemoryServiceDeps['config'],
     stores?: CoreStores,
+    tllRepository?: import('../db/repository-tll.js').TllRepository,
   ) {
     const resolvedEntities = entities ?? null;
     const resolvedLessons = lessons ?? null;
@@ -57,6 +58,7 @@ export class MemoryService {
         pool: typeof repo.getPool === 'function' ? repo.getPool() : ({} as never),
       },
       observationService: observationService ?? null,
+      tllRepository: tllRepository ?? null,
       uriResolver: new URIResolver(repo, claims),
     };
   }

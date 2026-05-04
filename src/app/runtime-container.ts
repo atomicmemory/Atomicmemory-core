@@ -26,6 +26,7 @@ import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
 import { ObservationRepository } from '../db/repository-observation.js';
 import { ObservationService } from '../services/observation-service.js';
+import { TllRepository } from '../db/repository-tll.js';
 import type { CoreStores } from '../db/stores.js';
 import { PgMemoryStore } from '../db/pg-memory-store.js';
 import { PgEpisodeStore } from '../db/pg-episode-store.js';
@@ -220,6 +221,10 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
   const observationRepo = new ObservationRepository(pool);
   const observationService = new ObservationService(observationRepo, memory);
 
+  // Phase 4 TLL — per-entity event chain for EO/MSR/TR queries.
+  // Append on memory store, traverse on retrieval.
+  const tllRepository = entities ? new TllRepository(pool) : null;
+
   const service = new MemoryService(
     memory,
     claims,
@@ -228,6 +233,7 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     observationService,
     runtimeConfig,
     stores,
+    tllRepository ?? undefined,
   );
 
   return {

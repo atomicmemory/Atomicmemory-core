@@ -323,6 +323,29 @@ CREATE TABLE IF NOT EXISTS memory_entities (
 
 CREATE INDEX IF NOT EXISTS idx_memory_entities_entity ON memory_entities (entity_id);
 
+-- Phase 4: Temporal Linkage List (TLL).
+-- Per-entity sparse graph of event nodes with predecessor/successor edges.
+-- Karpathy-minimal: append on ingest, traverse on EO/MSR/TR queries.
+-- Targets the abilities Mem0 explicitly admits their architecture doesn't
+-- crack at 10M (temporal reasoning, event ordering, multi-session reasoning).
+-- The unique architectural primitive nobody has shipped publicly.
+CREATE TABLE IF NOT EXISTS temporal_linkage_list (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  entity_id UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  predecessor_memory_id UUID DEFAULT NULL REFERENCES memories(id) ON DELETE SET NULL,
+  observation_date TIMESTAMPTZ NOT NULL,
+  position_in_chain INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, entity_id, memory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tll_entity_chain
+  ON temporal_linkage_list (user_id, entity_id, position_in_chain);
+CREATE INDEX IF NOT EXISTS idx_tll_memory
+  ON temporal_linkage_list (memory_id);
+
 -- Entity relations: typed, directed edges between entities with temporal validity
 CREATE TABLE IF NOT EXISTS entity_relations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
