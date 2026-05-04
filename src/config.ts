@@ -161,6 +161,16 @@ export interface RuntimeConfig {
    * AbortSignal.timeout — we wire it through here.
    */
   anthropicLlmTimeoutMs: number;
+  /**
+   * Phase 1 (Mem0-pattern) ADD-only switch. When true, memory-audn
+   * short-circuits the slow LLM mutation-decision path: every fact
+   * that's not a fast-AUDN near-duplicate NOOP is stored as ADD.
+   * Defers state-change semantics to retrieval time (latest-by-date
+   * wins). Halves ingest latency and eliminates the AUDN-LLM hang
+   * vector. Default false to preserve current behavior; flip to true
+   * via env AUDN_LLM_DISABLED=true.
+   */
+  audnLlmDisabled: boolean;
   googleApiKey?: string;
   costLoggingEnabled: boolean;
   costLogDir: string;
@@ -336,6 +346,7 @@ export const config: RuntimeConfig = {
   groqApiKey: groqApiKey ?? undefined,
   anthropicApiKey: anthropicApiKey ?? undefined,
   anthropicLlmTimeoutMs: parseInt(optionalEnv('ANTHROPIC_LLM_TIMEOUT_MS') ?? '30000', 10),
+  audnLlmDisabled: (optionalEnv('AUDN_LLM_DISABLED') ?? 'false') === 'true',
   googleApiKey: googleApiKey ?? undefined,
 
   // Ollama
@@ -478,7 +489,7 @@ export const SUPPORTED_RUNTIME_CONFIG_FIELDS = [
   'embeddingApiUrl', 'embeddingApiKey',
   'voyageApiKey', 'voyageDocumentModel', 'voyageQueryModel',
   'llmProvider', 'llmModel', 'llmApiUrl', 'llmApiKey',
-  'groqApiKey', 'anthropicApiKey', 'anthropicLlmTimeoutMs', 'googleApiKey',
+  'groqApiKey', 'anthropicApiKey', 'anthropicLlmTimeoutMs', 'audnLlmDisabled', 'googleApiKey',
   'ollamaBaseUrl', 'vectorBackend', 'skipVectorIndexes', 'llmSeed',
   'crossEncoderModel', 'crossEncoderDtype',
   // Operator-visible runtime

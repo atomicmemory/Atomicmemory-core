@@ -247,6 +247,29 @@ export const ObservationsRegenerateResponseSchema = z.object({
   processed: z.number(),
 }).openapi({ description: 'Observation regeneration result — count of subjects processed.' });
 
+export const FirstMentionsExtractResponseSchema = z.object({
+  events: z.array(z.object({
+    topic: z.string(),
+    turn_id: z.number(),
+    memory_id: z.string(),
+    anchor_date: z.string().nullable(),
+    position_in_conversation: z.number(),
+  })),
+}).openapi({ description: 'Extracted first-mention events for a conversation.' });
+
+export const EventChainsResponseSchema = z.object({
+  chains: z.array(z.object({
+    entity_id: z.string(),
+    events: z.array(z.object({
+      memory_id: z.string(),
+      content: z.string(),
+      observation_date: z.string(),
+      position_in_chain: z.number(),
+      predecessor_memory_id: z.string().nullable(),
+    })),
+  })),
+}).openapi({ description: 'Per-entity chronological event chains from the Temporal Linkage List.' });
+
 export const DecayResponseSchema = z.object({
   memories_evaluated: z.number(),
   candidates_for_archival: z.array(DecayCandidateSchema),

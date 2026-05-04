@@ -365,6 +365,14 @@ describe('EXTRACTION_PROMPT — assistant-turn extraction directives', () => {
     expect(EXTRACTION_PROMPT).toContain('Skip generic assistant chatter');
   });
 
+  it('explicitly forbids extracting assistant explanatory hypothetical content (Diagnostic 1b)', () => {
+    // ABS regression -0.56 in Phase 1 was driven by over-surfacing
+    // assistant chatter as if it were user facts. Revert preserves the
+    // narrow factual extraction (recommendations, named entities, data)
+    // while explicitly forbidding hypothetical/explanatory extraction.
+    expect(EXTRACTION_PROMPT).toContain('DO NOT extract assistant explanatory hypothetical content');
+  });
+
   it('does NOT contain the old blanket skip-assistant instruction', () => {
     expect(EXTRACTION_PROMPT).not.toContain('Skip information the AI assistant stated');
     expect(EXTRACTION_PROMPT).not.toContain('extract only user-provided info');

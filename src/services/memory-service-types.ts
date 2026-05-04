@@ -263,6 +263,10 @@ export interface MemoryServiceDeps {
   /** Domain-facing store interfaces (Phase 5). */
   stores: import('../db/stores.js').CoreStores;
   observationService: import('./observation-service.js').ObservationService | null;
+  /** Phase 4 TLL — per-entity event chains for EO/MSR/TR retrieval. */
+  tllRepository: import('../db/repository-tll.js').TllRepository | null;
+  /** First-mention events — chronological topic-introduction list. */
+  firstMentionService: import('./first-mention-service.js').FirstMentionService | null;
   uriResolver: import('./atomicmem-uri.js').URIResolver;
 }
 
@@ -289,6 +293,13 @@ export interface IngestRuntimeConfig {
   entropyGateThreshold: number;
   fastAudnDuplicateThreshold: number;
   fastAudnEnabled: boolean;
+  /**
+   * Phase 1 (Mem0-pattern) ADD-only switch — when true, the slow LLM
+   * mutation-decision path in memory-audn is bypassed; every fact that's
+   * not a fast-AUDN near-duplicate NOOP is stored as ADD. Defers state-
+   * change semantics to retrieval-time.
+   */
+  audnLlmDisabled: boolean;
   ingestTraceEnabled: boolean;
   lessonsEnabled: boolean;
   llmModel: string;

@@ -253,6 +253,43 @@ export async function findNearDuplicatesInWorkspace(
   return findDuplicateVectorsInWorkspace(pool, workspaceId, embedding, threshold, limit, agentScope, callerAgentId);
 }
 
+/**
+ * Phase 1c (Mem0-pattern): expand each keyword with verb-form variants so
+ * "attending" matches stored "attend" / "attended" / "attends" via ILIKE
+ * substring search. Mem0 reports measurable lift from this. Minimal English-
+ * verb suffix table — covers the common cases without an NLP dep. For
+ * non-verb keywords (proper nouns, numbers, dates) the variants degrade to
+ * harmless near-duplicates.
+ */
+function expandKeywordVariants(keyword: string): string[] {
+  const k = keyword.trim();
+  if (k.length < 4) return [k];
+  const variants = new Set<string>([k]);
+  const lower = k.toLowerCase();
+  // -ing → root, -ed → root, -s → root
+  if (lower.endsWith('ing') && lower.length > 5) {
+    variants.add(k.slice(0, -3));
+    variants.add(k.slice(0, -3) + 'e'); // make → making → mak/make
+  }
+  if (lower.endsWith('ed') && lower.length > 4) {
+    variants.add(k.slice(0, -2));
+    variants.add(k.slice(0, -1)); // booked → book / booke
+  }
+  if (lower.endsWith('es') && lower.length > 4) {
+    variants.add(k.slice(0, -2));
+    variants.add(k.slice(0, -1));
+  } else if (lower.endsWith('s') && lower.length > 3) {
+    variants.add(k.slice(0, -1));
+  }
+  // Forward direction: root → root+ing, root+ed, root+s
+  if (lower.length >= 3 && !/[aeiou]ing$|[aeiou]ed$|[aeiou]s$/.test(lower)) {
+    variants.add(k + 'ing');
+    variants.add(k + 'ed');
+    variants.add(k + 's');
+  }
+  return [...variants];
+}
+
 export async function findKeywordCandidates(
   pool: pg.Pool,
   userId: string,
@@ -263,6 +300,8 @@ export async function findKeywordCandidates(
   if (keywords.length === 0) return [];
   const candidateLimit = Math.max(limit * 4, limit);
   const expiredClause = includeExpired ? '' : 'AND expired_at IS NULL';
+  // Expand each keyword to its verb-form variants
+  const expandedKeywords = keywords.flatMap((k) => expandKeywordVariants(k));
   const result = await pool.query(
     `SELECT id, content, importance
      FROM memories
@@ -274,7 +313,7 @@ export async function findKeywordCandidates(
        AND content ILIKE ANY($2::text[])
      ORDER BY importance DESC, created_at DESC
      LIMIT $3`,
-    [userId, keywords.map((keyword) => `%${keyword}%`), candidateLimit],
+    [userId, expandedKeywords.map((keyword) => `%${keyword}%`), candidateLimit],
   );
   return result.rows
     .map((row) => ({

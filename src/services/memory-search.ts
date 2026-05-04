@@ -18,6 +18,7 @@ import { TraceCollector } from './retrieval-trace.js';
 import { excludeStaleComposites } from './composite-staleness.js';
 import { applyFlatPackagingPolicy } from './composite-dedup.js';
 import { recordSearchSideEffects } from './retrieval-side-effects.js';
+import { shouldUseTLL, expandViaTLL } from './tll-retrieval.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
 
@@ -78,7 +79,53 @@ async function executeSearchStep(
     skipReranking: retrievalOptions?.skipReranking,
     runtimeConfig: deps.config,
   });
-  return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace, retrievalConfidence: pipelineResult.retrievalConfidence };
+  let memories = pipelineResult.filtered;
+
+  // Phase 4b — TLL retrieval signal. For ordering/temporal/multi-session
+  // queries, expand the candidate set by traversing entity event chains.
+  // The unique architectural primitive: per-entity chronological event
+  // sequences that no current SOTA system surfaces at retrieval time.
+  if (deps.tllRepository && memories.length > 0) {
+    if (shouldUseTLL(query)) {
+      try {
+        const initialIds = memories.slice(0, 10).map((m) => m.id);
+        const chainIds = await expandViaTLL(userId, initialIds, deps.tllRepository, deps.stores.pool);
+        const knownIds = new Set(memories.map((m) => m.id));
+        const newIds = chainIds.filter((id) => !knownIds.has(id)).slice(0, effectiveLimit);
+        if (newIds.length > 0) {
+          // Direct SQL hydration into SearchResult shape — bypasses store
+          // abstraction since this is a deterministic chain-traversal
+          // augmentation, not a similarity search.
+          const hydratedRes = await deps.stores.pool.query<{ id: string; content: string; created_at: Date; importance: number; namespace: string | null }>(
+            `SELECT id, content, created_at, importance, namespace
+             FROM memories
+             WHERE user_id = $1 AND id = ANY($2::uuid[])
+               AND deleted_at IS NULL AND status = 'active'`,
+            [userId, newIds],
+          );
+          const hydrated: SearchResult[] = hydratedRes.rows.map((r) => ({
+            id: r.id,
+            content: r.content,
+            similarity: 0.5, // mid-range; chain-membership is a different signal
+            created_at: r.created_at,
+            importance: Number(r.importance),
+            namespace: r.namespace,
+            tags: [],
+            keywords: [],
+            workspace_id: null,
+            agent_id: null,
+          } as unknown as SearchResult));
+          memories = [...memories, ...hydrated];
+          console.log(`[tll-retrieval] expanded ${newIds.length} chain memories for ordering query`);
+        }
+      } catch (err) {
+        // Fail-open: TLL is augmentation; never block primary retrieval
+        console.error('[tll-retrieval] expansion failed:', err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  return { memories, activeTrace: pipelineResult.trace, retrievalConfidence: pipelineResult.retrievalConfidence };
 }
 
 /** Filter workspace-scoped, stale composites, and consensus-violating memories. */

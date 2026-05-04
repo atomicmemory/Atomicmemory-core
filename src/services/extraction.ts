@@ -235,6 +235,7 @@ RULES:
 - Skip pleasantries, filler, acknowledgments, and meta-conversation.
 - Skip generic assistant chatter (acknowledgments, "sure!", "got it", "as an AI").
 - DO extract specific factual content from assistant responses: named entities, recommendations with proper nouns, schedules, data tables, creative writing with specific details. Prefix these with "Assistant mentioned:" or "Assistant recommended:".
+- **CRITICAL — DO NOT extract assistant explanatory hypothetical content.** When the assistant explains how a topic could work, gives examples of similar projects, or speculates, that is NOT a fact the user stated. Extracting it surfaces phantom-facts that confuse abstention questions ("did the user mention X" — when only the assistant did). Only extract assistant content that confirms actions actually taken, recommendations actually given, or factual content actually supplied to the user.
 - SHORT INPUTS: Even a single sentence like "My email is bob@example.com" contains an extractable fact. Do NOT skip short inputs — if the user stated something factual, extract it regardless of length.
 - CONTACT INFO: Email addresses, phone numbers, home addresses, and similar personal details are always extractable facts with importance >= 0.5.
 - Rate importance 0.0-1.0:
@@ -324,9 +325,20 @@ export async function extractFacts(
   conversationText: string,
   options: ExtractionOptions = {},
 ): Promise<ExtractedFact[]> {
+  // Phase 2 / H2b finding (2026-05-03): the concept-faithful prompt
+  // produces raw conversation excerpts on Haiku, not synthesized memories
+  // (mean 14 words, samples show literal user/assistant utterances copied
+  // verbatim). Reverting to atomic as default. Concept-faithful remains
+  // available behind EXTRACTION_PROMPT_VARIANT=concept-faithful for
+  // controlled experiments. The Mem0-pattern win comes from ADD-only
+  // (AUDN_LLM_DISABLED=true), not from changing extraction granularity
+  // alone — see Phase 1 in 2026-05-03-deep-state-analysis.md.
+  const { CONCEPT_FAITHFUL_EXTRACTION_PROMPT } = await import('./extraction-concept-faithful.js');
+  const variant = process.env.EXTRACTION_PROMPT_VARIANT ?? 'atomic';
+  const activePrompt = variant === 'concept-faithful' ? CONCEPT_FAITHFUL_EXTRACTION_PROMPT : EXTRACTION_PROMPT;
   const content = await timed('ingest.extract.llm', () => withCostStage('extract', () => llm.chat(
     [
-      { role: 'system', content: EXTRACTION_PROMPT },
+      { role: 'system', content: activePrompt },
       { role: 'user', content: buildExtractionUserMessage(conversationText, options) },
     ],
     { temperature: 0, jsonMode: true, maxTokens: EXTRACTION_MAX_TOKENS, seed: config.llmSeed ?? 42 },

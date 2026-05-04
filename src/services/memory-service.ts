@@ -10,6 +10,8 @@ import { ClaimRepository } from '../db/claim-repository.js';
 import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
 import { ObservationService } from './observation-service.js';
+import type { FirstMentionService } from './first-mention-service.js';
+import type { FirstMentionEvent } from '../db/repository-first-mentions.js';
 import { URIResolver } from './atomicmem-uri.js';
 import type { CoreStores } from '../db/stores.js';
 import { type TierAssignment } from './tiered-loading.js';
@@ -40,6 +42,8 @@ export class MemoryService {
     observationService?: ObservationService,
     runtimeConfig?: MemoryServiceDeps['config'],
     stores?: CoreStores,
+    tllRepository?: import('../db/repository-tll.js').TllRepository,
+    firstMentionService?: FirstMentionService,
   ) {
     const resolvedEntities = entities ?? null;
     const resolvedLessons = lessons ?? null;
@@ -57,6 +61,8 @@ export class MemoryService {
         pool: typeof repo.getPool === 'function' ? repo.getPool() : ({} as never),
       },
       observationService: observationService ?? null,
+      firstMentionService: firstMentionService ?? null,
+      tllRepository: tllRepository ?? null,
       uriResolver: new URIResolver(repo, claims),
     };
   }
@@ -193,6 +199,54 @@ export class MemoryService {
   async getLessonStats(userId: string) { return crud.getLessonStats(this.deps, userId); }
   async reportLesson(userId: string, pattern: string, sourceMemoryIds: string[], severity?: 'low' | 'medium' | 'high' | 'critical') { return crud.reportLesson(this.deps, userId, pattern, sourceMemoryIds, severity); }
   async deactivateLesson(userId: string, lessonId: string) { return crud.deactivateLesson(this.deps, userId, lessonId); }
+
+  // --- First-mention events (chronological topic-introduction list) ---
+
+  /**
+   * Extract first-mention events from a conversation transcript and persist
+   * them to `first_mention_events`. Caller supplies the turn-id-to-memory-id
+   * mapping (the ingest pipeline does not retain turn structure, so the
+   * caller — typically the BEAM harness — knows the mapping). Returns the
+   * parsed events. Best-effort: if the underlying LLM call fails or the
+   * service is not wired, returns `[]` without throwing.
+   */
+  async extractFirstMentions(
+    userId: string,
+    conversationText: string,
+    sourceSite: string,
+    memoryIdsByTurnId: Map<number, string>,
+  ): Promise<FirstMentionEvent[]> {
+    const svc = this.deps.firstMentionService;
+    if (!svc) return [];
+    return svc.extractAndStore(userId, conversationText, sourceSite, memoryIdsByTurnId);
+  }
+
+  // --- Event chains (TLL read API) ---
+
+  /**
+   * Retrieve per-entity chronological event chains from the Temporal Linkage
+   * List. Used by `GET /v1/memories/event-chains` and by EO-shaped read paths
+   * that need content alongside chain position. Returns one entry per entity
+   * with an ordered list of events (memoryId, content, observationDate,
+   * positionInChain). Entities without events are dropped from the result.
+   */
+  async getEventChains(
+    userId: string,
+    entityIds: string[],
+  ): Promise<Array<{
+    entityId: string;
+    events: Array<{
+      memoryId: string;
+      content: string;
+      observationDate: Date;
+      positionInChain: number;
+      predecessorMemoryId: string | null;
+    }>;
+  }>> {
+    const tll = this.deps.tllRepository;
+    if (!tll) return [];
+    return tll.chainEventsForEntities(userId, entityIds);
+  }
 
   // --- Observation network ---
 
