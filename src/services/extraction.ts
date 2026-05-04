@@ -233,15 +233,9 @@ RULES:
   WRONG: "User wants PostgreSQL for the production backend."
   RIGHT: "User wants PostgreSQL for the production backend, replacing the earlier MongoDB choice."
 - Skip pleasantries, filler, acknowledgments, and meta-conversation.
-- Skip ONLY truly generic assistant chatter ("sure!", "got it", "as an AI", "happy to help"). DO NOT skip substantive assistant content.
-- **AGENT-FACTS ARE FIRST-CLASS** (Phase 1b, Mem0 pattern): aggressively extract substantive content from assistant responses. This includes:
-  - Confirmations of actions ("I've booked your flight for March 3" → "Assistant confirmed flight booking on March 3")
-  - Recommendations with reasoning ("I recommend Werkzeug 2.3.0 for password hashing because..." → "Assistant recommended Werkzeug 2.3.0 for password hashing")
-  - Specific facts the assistant supplied (dates, versions, code blocks, library names, schedules, data tables)
-  - Decisions the assistant made on the user's behalf
-  - Computed numbers, results, summaries the assistant produced
-  Prefix these facts with "Assistant confirmed:", "Assistant recommended:", or "Assistant computed:".
-  When the user asks "what did we decide?" or "what was the plan?" they need agent-generated facts retrievable just like user-stated facts. Mem0 reports +53.6 on single-session-assistant from this change alone.
+- Skip generic assistant chatter (acknowledgments, "sure!", "got it", "as an AI").
+- DO extract specific factual content from assistant responses: named entities, recommendations with proper nouns, schedules, data tables, creative writing with specific details. Prefix these with "Assistant mentioned:" or "Assistant recommended:".
+- **CRITICAL — DO NOT extract assistant explanatory hypothetical content.** When the assistant explains how a topic could work, gives examples of similar projects, or speculates, that is NOT a fact the user stated. Extracting it surfaces phantom-facts that confuse abstention questions ("did the user mention X" — when only the assistant did). Only extract assistant content that confirms actions actually taken, recommendations actually given, or factual content actually supplied to the user.
 - SHORT INPUTS: Even a single sentence like "My email is bob@example.com" contains an extractable fact. Do NOT skip short inputs — if the user stated something factual, extract it regardless of length.
 - CONTACT INFO: Email addresses, phone numbers, home addresses, and similar personal details are always extractable facts with importance >= 0.5.
 - Rate importance 0.0-1.0:
