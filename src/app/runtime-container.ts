@@ -27,6 +27,9 @@ import { LessonRepository } from '../db/repository-lessons.js';
 import { ObservationRepository } from '../db/repository-observation.js';
 import { ObservationService } from '../services/observation-service.js';
 import { TllRepository } from '../db/repository-tll.js';
+import { FirstMentionRepository } from '../db/repository-first-mentions.js';
+import { FirstMentionService } from '../services/first-mention-service.js';
+import { llm } from '../services/llm.js';
 import type { CoreStores } from '../db/stores.js';
 import { PgMemoryStore } from '../db/pg-memory-store.js';
 import { PgEpisodeStore } from '../db/pg-episode-store.js';
@@ -225,6 +228,27 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
   // Append on memory store, traverse on retrieval.
   const tllRepository = entities ? new TllRepository(pool) : null;
 
+  // First-mention events — chronological topic-introduction list. Caller
+  // (e.g. the BEAM harness) drives extraction explicitly via the
+  // POST /v1/memories/first-mentions/extract route, supplying its own
+  // turn-id-to-memory-id mapping (the ingest pipeline does not retain
+  // turn structure). The chatFn adapter wraps the configured LLM
+  // singleton; per-call cost is logged inside `llm.chat`.
+  const firstMentionRepository = new FirstMentionRepository(pool);
+  const firstMentionService = new FirstMentionService(
+    firstMentionRepository,
+    async (system, user, maxTokens) => {
+      const text = await llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        { maxTokens },
+      );
+      return { text, inputTokens: 0, outputTokens: 0 };
+    },
+  );
+
   const service = new MemoryService(
     memory,
     claims,
@@ -234,6 +258,7 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     runtimeConfig,
     stores,
     tllRepository ?? undefined,
+    firstMentionService,
   );
 
   return {

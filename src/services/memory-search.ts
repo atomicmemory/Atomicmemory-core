@@ -18,6 +18,7 @@ import { TraceCollector } from './retrieval-trace.js';
 import { excludeStaleComposites } from './composite-staleness.js';
 import { applyFlatPackagingPolicy } from './composite-dedup.js';
 import { recordSearchSideEffects } from './retrieval-side-effects.js';
+import { shouldUseTLL, expandViaTLL } from './tll-retrieval.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
 
@@ -85,7 +86,6 @@ async function executeSearchStep(
   // The unique architectural primitive: per-entity chronological event
   // sequences that no current SOTA system surfaces at retrieval time.
   if (deps.tllRepository && memories.length > 0) {
-    const { shouldUseTLL, expandViaTLL } = await import('./tll-retrieval.js');
     if (shouldUseTLL(query)) {
       try {
         const initialIds = memories.slice(0, 10).map((m) => m.id);

@@ -22,6 +22,8 @@ export const MEMORY_RESPONSE_SCHEMAS: ResponseSchemaMap = {
   'get /health': R.HealthResponseSchema,
   'put /config': R.ConfigUpdateResponseSchema,
   'post /observations/regenerate': R.ObservationsRegenerateResponseSchema,
+  'get /event-chains': R.EventChainsResponseSchema,
+  'post /first-mentions/extract': R.FirstMentionsExtractResponseSchema,
   'post /consolidate': R.ConsolidateResponseSchema,
   'post /decay': R.DecayResponseSchema,
   'get /cap': R.CapResponseSchema,
