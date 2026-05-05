@@ -116,4 +116,64 @@ export class TllRepository {
     );
     return result.rows.map((row) => row.memory_id);
   }
+
+  /**
+   * Bulk-retrieve enriched event chains: per-entity ordered list of events
+   * joined with memory content. Used by the event-chains HTTP endpoint and
+   * by EO-shaped read paths that need content alongside chain position.
+   *
+   * Returns one entry per entity; entities with no events are dropped.
+   * Within an entity, events are ordered by position_in_chain ASC.
+   */
+  async chainEventsForEntities(
+    userId: string,
+    entityIds: string[],
+  ): Promise<Array<{
+    entityId: string;
+    events: Array<{
+      memoryId: string;
+      content: string;
+      observationDate: Date;
+      positionInChain: number;
+      predecessorMemoryId: string | null;
+    }>;
+  }>> {
+    if (entityIds.length === 0) return [];
+    const unique = [...new Set(entityIds)];
+    const result = await this.pool.query(
+      `SELECT t.entity_id,
+              t.memory_id,
+              t.predecessor_memory_id,
+              t.observation_date,
+              t.position_in_chain,
+              m.content
+       FROM temporal_linkage_list t
+       JOIN memories m ON m.id = t.memory_id
+       WHERE t.user_id = $1
+         AND t.entity_id = ANY($2::uuid[])
+         AND m.deleted_at IS NULL
+         AND m.status = 'active'
+       ORDER BY t.entity_id, t.position_in_chain ASC`,
+      [userId, unique],
+    );
+    const grouped = new Map<string, Array<{
+      memoryId: string;
+      content: string;
+      observationDate: Date;
+      positionInChain: number;
+      predecessorMemoryId: string | null;
+    }>>();
+    for (const row of result.rows) {
+      const list = grouped.get(row.entity_id) ?? [];
+      list.push({
+        memoryId: row.memory_id,
+        content: row.content,
+        observationDate: row.observation_date,
+        positionInChain: row.position_in_chain,
+        predecessorMemoryId: row.predecessor_memory_id,
+      });
+      grouped.set(row.entity_id, list);
+    }
+    return [...grouped.entries()].map(([entityId, events]) => ({ entityId, events }));
+  }
 }

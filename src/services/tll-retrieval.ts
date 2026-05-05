@@ -32,7 +32,6 @@ export function shouldUseTLL(query: string): boolean {
  * Exported for direct unit testing of SQL shape; the production caller
  * is `expandViaTLL` below.
  */
-// fallow-ignore-next-line unused-export
 export async function entitiesForMemories(
   pool: pg.Pool,
   memoryIds: string[],
