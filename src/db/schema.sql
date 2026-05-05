@@ -346,6 +346,36 @@ CREATE INDEX IF NOT EXISTS idx_tll_entity_chain
 CREATE INDEX IF NOT EXISTS idx_tll_memory
   ON temporal_linkage_list (memory_id);
 
+-- =====================================================================
+-- First-mention events (chronological topic-introduction list)
+-- =====================================================================
+-- Per-user list of "the first time topic X was introduced in conversation."
+-- Distinct from facts (which are atomic claims) and memories (which are
+-- ingested chunks). The grain matches event-ordering rubrics:
+-- "in what order did the user bring up these aspects."
+--
+-- Generated post-ingest by FirstMentionService via a single LLM call that
+-- scans the full conversation and outputs a JSON array of first-mention
+-- events. Idempotent on (user_id, memory_id) so re-running doesn't duplicate.
+CREATE TABLE IF NOT EXISTS first_mention_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  turn_id INTEGER NOT NULL,
+  memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  anchor_date TIMESTAMPTZ DEFAULT NULL,
+  position_in_conversation INTEGER NOT NULL,
+  source_site TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, memory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_first_mention_user_position
+  ON first_mention_events (user_id, position_in_conversation);
+
+CREATE INDEX IF NOT EXISTS idx_first_mention_user_topic
+  ON first_mention_events USING GIN (to_tsvector('english', topic));
+
 -- Entity relations: typed, directed edges between entities with temporal validity
 CREATE TABLE IF NOT EXISTS entity_relations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

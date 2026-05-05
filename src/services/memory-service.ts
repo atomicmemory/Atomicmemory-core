@@ -10,6 +10,7 @@ import { ClaimRepository } from '../db/claim-repository.js';
 import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
 import { ObservationService } from './observation-service.js';
+import type { FirstMentionService } from './first-mention-service.js';
 import { URIResolver } from './atomicmem-uri.js';
 import type { CoreStores } from '../db/stores.js';
 import { type TierAssignment } from './tiered-loading.js';
@@ -41,6 +42,7 @@ export class MemoryService {
     runtimeConfig?: MemoryServiceDeps['config'],
     stores?: CoreStores,
     tllRepository?: import('../db/repository-tll.js').TllRepository,
+    firstMentionService?: FirstMentionService,
   ) {
     const resolvedEntities = entities ?? null;
     const resolvedLessons = lessons ?? null;
@@ -59,6 +61,7 @@ export class MemoryService {
       },
       observationService: observationService ?? null,
       tllRepository: tllRepository ?? null,
+      firstMentionService: firstMentionService ?? null,
       uriResolver: new URIResolver(repo, claims),
     };
   }
