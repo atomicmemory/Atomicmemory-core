@@ -214,6 +214,22 @@ async function resolveAndLinkEntities(
   const entityEmbeddings = await embedTexts(entities.map((e) => e.name));
   const nameToEntityId = await resolveEntities(deps, userId, memoryId, entities, entityEmbeddings);
   await storeRelations(deps, userId, memoryId, relations, nameToEntityId);
+
+  // Phase 4 — TLL append: per-entity event-chain extension. Each new memory
+  // referencing an entity becomes the new tip of that entity's chain.
+  // Used at retrieval-time for EO/MSR/TR queries. Best-effort, fire-and-
+  // forget to keep ingest hot path fast.
+  if (deps.tllRepository) {
+    const entityIds = [...nameToEntityId.values()];
+    if (entityIds.length > 0) {
+      const observationDate = new Date();
+      deps.tllRepository
+        .append(userId, memoryId, entityIds, observationDate)
+        .catch((err) =>
+          console.error('[tll] append failed:', err instanceof Error ? err.message : err),
+        );
+    }
+  }
 }
 
 /** Resolve each extracted entity and link it to the memory. */

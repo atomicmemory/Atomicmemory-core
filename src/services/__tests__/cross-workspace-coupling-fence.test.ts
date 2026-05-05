@@ -97,6 +97,7 @@ function makeDeps(entityStore: any): MemoryServiceDeps {
       entity: entityStore,
     } as any,
     observationService: null,
+    tllRepository: null,
     uriResolver: {} as any,
   };
 }

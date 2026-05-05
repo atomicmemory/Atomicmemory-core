@@ -24,6 +24,7 @@ import { LinkRepository } from '../db/link-repository.js';
 import { MemoryRepository } from '../db/memory-repository.js';
 import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
+import { TllRepository } from '../db/repository-tll.js';
 import type { CoreStores } from '../db/stores.js';
 import { PgMemoryStore } from '../db/pg-memory-store.js';
 import { PgEpisodeStore } from '../db/pg-episode-store.js';
@@ -202,6 +203,10 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     pool,
   };
 
+  // Phase 4 TLL — per-entity event chain for EO/MSR/TR queries.
+  // Append on memory store, traverse on retrieval.
+  const tllRepository = entities ? new TllRepository(pool) : null;
+
   const service = new MemoryService(
     memory,
     claims,
@@ -210,6 +215,7 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     undefined,
     runtimeConfig,
     stores,
+    tllRepository ?? undefined,
   );
 
   return {
