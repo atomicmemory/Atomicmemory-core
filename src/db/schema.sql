@@ -334,7 +334,7 @@ CREATE TABLE IF NOT EXISTS temporal_linkage_list (
   user_id TEXT NOT NULL,
   entity_id UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-  predecessor_memory_id UUID DEFAULT NULL REFERENCES memories(id) ON DELETE SET NULL,
+  predecessor_memory_id UUID DEFAULT NULL REFERENCES memories(id) ON DELETE CASCADE,
   observation_date TIMESTAMPTZ NOT NULL,
   position_in_chain INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -352,6 +352,28 @@ CREATE INDEX IF NOT EXISTS idx_tll_memory
 -- existing schemas.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tll_chain_position_unique
   ON temporal_linkage_list (user_id, entity_id, position_in_chain);
+
+-- Align predecessor FK with memory FK (CASCADE) so a hard-deleted memory
+-- removes the dependent chain node instead of leaving a half-broken
+-- predecessor pointer that breaks backward chain traversal. Idempotent:
+-- re-applying the constraint overwrites any prior ON DELETE SET NULL
+-- definition. Required for existing databases since the table-level
+-- CREATE TABLE IF NOT EXISTS above does not update column constraints.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'temporal_linkage_list'
+      AND constraint_name = 'temporal_linkage_list_predecessor_memory_id_fkey'
+  ) THEN
+    ALTER TABLE temporal_linkage_list
+      DROP CONSTRAINT temporal_linkage_list_predecessor_memory_id_fkey;
+  END IF;
+  ALTER TABLE temporal_linkage_list
+    ADD CONSTRAINT temporal_linkage_list_predecessor_memory_id_fkey
+    FOREIGN KEY (predecessor_memory_id) REFERENCES memories(id)
+    ON DELETE CASCADE;
+END$$;
 
 -- =====================================================================
 -- First-mention events (chronological topic-introduction list)
