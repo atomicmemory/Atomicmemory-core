@@ -14,8 +14,6 @@ import { FirstMentionService } from '../first-mention-service.js';
 
 interface ChatResult {
   text: string;
-  inputTokens: number;
-  outputTokens: number;
 }
 
 function makeRepo() {
@@ -28,11 +26,7 @@ function makeRepo() {
 
 function chatReturning(text: string) {
   return vi.fn(
-    async (): Promise<ChatResult> => ({
-      text,
-      inputTokens: 100,
-      outputTokens: 50,
-    }),
+    async (): Promise<ChatResult> => ({ text }),
   );
 }
 

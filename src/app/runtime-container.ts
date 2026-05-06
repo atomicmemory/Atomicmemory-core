@@ -227,7 +227,12 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
         ],
         { maxTokens },
       );
-      return { text, inputTokens: 0, outputTokens: 0 };
+      // Token usage is intentionally NOT returned here: `LLMProvider.chat`
+      // emits per-call cost telemetry via `writeCostEvent` internally
+      // (see `src/services/llm.ts`). Surfacing zeros at this seam invited
+      // the bug the prior reviewer caught — readers would treat them as
+      // real counts. Drop the field instead until usage is plumbed.
+      return { text };
     },
   );
 

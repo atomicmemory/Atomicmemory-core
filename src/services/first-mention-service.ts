@@ -21,10 +21,19 @@ import {
   type FirstMentionEvent,
 } from '../db/repository-first-mentions.js';
 
+/**
+ * Minimal chat-call shape for first-mention extraction.
+ *
+ * Token usage is intentionally not threaded here: cost telemetry for the
+ * underlying LLM call is already emitted from `LLMProvider.chat` (see
+ * `src/services/llm.ts` -> `writeCostEvent`). Reading per-call usage at
+ * this layer would require widening the LLMProvider.chat return type to
+ * include usage and plumbing it through every adapter; until something in
+ * the FirstMentionService path actually consumes it, the extra surface
+ * area would only invite hardcoded zeros that mislead downstream readers.
+ */
 interface ChatResult {
   text: string;
-  inputTokens: number;
-  outputTokens: number;
 }
 
 type ChatFn = (
