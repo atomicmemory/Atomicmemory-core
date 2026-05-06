@@ -198,25 +198,42 @@ export class FirstMentionService {
     }
   }
 
-  /** Map LLM output records onto core's `FirstMentionEvent` shape. */
+  /**
+   * Map LLM output records onto core's `FirstMentionEvent` shape.
+   *
+   * `positionInConversation` is the 0-based index in the FINAL turn-id-
+   * sorted output, NOT `turn_id` itself. This makes the mapping stable
+   * across re-runs even when the LLM emits a slightly different
+   * `turn_id` for the same logical topic on a second pass — the
+   * `(user_id, memory_id)` UNIQUE constraint in `first_mention_events`
+   * skips the duplicate insert, but if `position_in_conversation`
+   * tracked `turn_id` directly, an unrelated drift in the second run's
+   * turn assignment would mean callers reading the row see whichever
+   * turn_id was first written. Encoding position by post-sort index
+   * eliminates that variability — read-side ordering is now a stable
+   * sequence (0, 1, 2, ...) regardless of which LLM run produced it.
+   */
   private mapToEvents(
     raw: unknown[],
     memoryIdsByTurnId: Map<number, string>,
   ): FirstMentionEvent[] {
     const filtered = raw.filter(isRawFirstMention);
-    const events: FirstMentionEvent[] = [];
+    const candidates: Array<Omit<FirstMentionEvent, 'positionInConversation'>> = [];
     for (const m of filtered) {
       const memoryId = memoryIdsByTurnId.get(m.turn_id);
       if (!memoryId) continue;
-      events.push({
+      candidates.push({
         topic: m.topic,
         turnId: m.turn_id,
         memoryId,
         anchorDate: parseAnchorDate(m.anchor_date),
-        positionInConversation: m.turn_id,
       });
     }
-    events.sort((a, b) => a.positionInConversation - b.positionInConversation);
+    candidates.sort((a, b) => a.turnId - b.turnId);
+    const events: FirstMentionEvent[] = candidates.map((c, index) => ({
+      ...c,
+      positionInConversation: index,
+    }));
     if (events.length === 0 && filtered.length > 0) {
       console.warn(
         `[first-mention-mapping] ${filtered.length} parsed entries had no matching memory_id`,
