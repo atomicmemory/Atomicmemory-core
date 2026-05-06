@@ -55,7 +55,7 @@ export async function storeCanonicalFact(
   if (!lineage?.memoryId) return { outcome: 'skipped', memoryId: null };
   const memoryId = lineage.memoryId;
   if (deps.config.entityGraphEnabled && deps.stores.entity) {
-    await resolveAndLinkEntities(deps, userId, memoryId, fact.entities, fact.relations, embedding);
+    await resolveAndLinkEntities(deps, userId, memoryId, fact.entities, fact.relations, embedding, logicalTimestamp);
     if (!claimSlot) {
       const persistedSlot = await derivePersistedClaimSlot(deps, userId, memoryId);
       if (persistedSlot) {
@@ -208,6 +208,7 @@ async function resolveAndLinkEntities(
   entities: ExtractedEntity[],
   relations: ExtractedRelation[],
   factEmbedding: number[],
+  logicalTimestamp?: Date,
 ): Promise<void> {
   if (!deps.stores.entity || entities.length === 0) return;
 
@@ -215,21 +216,60 @@ async function resolveAndLinkEntities(
   const nameToEntityId = await resolveEntities(deps, userId, memoryId, entities, entityEmbeddings);
   await storeRelations(deps, userId, memoryId, relations, nameToEntityId);
 
-  // Phase 4 — TLL append: per-entity event-chain extension. Each new memory
-  // referencing an entity becomes the new tip of that entity's chain.
-  // Used at retrieval-time for EO/MSR/TR queries. Best-effort, fire-and-
-  // forget to keep ingest hot path fast.
-  if (deps.tllRepository) {
-    const entityIds = [...nameToEntityId.values()];
-    if (entityIds.length > 0) {
-      const observationDate = new Date();
-      deps.tllRepository
-        .append(userId, memoryId, entityIds, observationDate)
-        .catch((err) =>
-          console.error('[tll] append failed:', err instanceof Error ? err.message : err),
-        );
-    }
+  await maybeAppendTll(deps, userId, memoryId, nameToEntityId, logicalTimestamp);
+}
+
+/**
+ * Phase 4 — TLL append: per-entity event-chain extension. Each new memory
+ * referencing an entity becomes the new tip of that entity's chain. Used at
+ * retrieval-time for EO/MSR/TR queries. Best-effort, fire-and-forget to
+ * keep ingest hot path fast.
+ *
+ * The chain orders by observation_date ASC, so we use the memory's
+ * observed_at (the conversation timestamp) instead of new Date() (the
+ * ingest-arrival timestamp). Otherwise out-of-order or backfilled
+ * conversations would chain by ingest time, breaking event ordering.
+ */
+async function maybeAppendTll(
+  deps: MemoryServiceDeps,
+  userId: string,
+  memoryId: string,
+  nameToEntityId: Map<string, string>,
+  logicalTimestamp?: Date,
+): Promise<void> {
+  if (!deps.tllRepository) return;
+  const entityIds = [...nameToEntityId.values()];
+  if (entityIds.length === 0) return;
+
+  const observationDate = await resolveTllObservationDate(deps, userId, memoryId, logicalTimestamp);
+  deps.tllRepository
+    .append(userId, memoryId, entityIds, observationDate)
+    .catch((err) =>
+      console.error('[tll] append failed:', err instanceof Error ? err.message : err),
+    );
+}
+
+/**
+ * Resolve the observation_date used for TLL chain ordering. Prefers the
+ * caller-supplied logical timestamp (the canonical conversation time);
+ * falls back to the memory row's observed_at column when the caller didn't
+ * supply one. Last-resort fallback to new Date() only fires if the row
+ * lookup fails — never silently drop the append.
+ */
+async function resolveTllObservationDate(
+  deps: MemoryServiceDeps,
+  userId: string,
+  memoryId: string,
+  logicalTimestamp: Date | undefined,
+): Promise<Date> {
+  if (logicalTimestamp) return logicalTimestamp;
+  try {
+    const memory = await deps.stores.memory.getMemory(memoryId, userId);
+    if (memory?.observed_at) return memory.observed_at;
+  } catch (err) {
+    console.error('[tll] failed to resolve observed_at:', err instanceof Error ? err.message : err);
   }
+  return new Date();
 }
 
 /** Resolve each extracted entity and link it to the memory. */
