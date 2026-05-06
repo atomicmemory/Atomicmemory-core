@@ -19,6 +19,16 @@
 import type pg from 'pg';
 import type { TllRepository } from '../db/repository-tll.js';
 
+/**
+ * Cap on the number of top similarity-ranked candidates that seed TLL
+ * entity-lookup. Bounds the per-query fan-out for the
+ * `memory_entities` join — a higher value increases recall on
+ * sprawling queries but inflates the worst-case row scan when an
+ * entity dictionary is dense. 10 matches the production search seed
+ * count in `memory-search.ts` so both call sites move together.
+ */
+export const TLL_ENTITY_LOOKUP_SEED_LIMIT = 10;
+
 const ORDERING_QUERY_RE =
   /\b(order|first|last|before|after|when did|evolution|chronological|sequence|timeline|history|over time|originally|initially|then|later|brought up|track|progression|how did .* evolve|in what order)\b/i;
 
@@ -56,7 +66,10 @@ export async function expandViaTLL(
   pool: pg.Pool,
 ): Promise<string[]> {
   if (initialMemoryIds.length === 0) return [];
-  const entityIds = await entitiesForMemories(pool, initialMemoryIds.slice(0, 10));
+  const entityIds = await entitiesForMemories(
+    pool,
+    initialMemoryIds.slice(0, TLL_ENTITY_LOOKUP_SEED_LIMIT),
+  );
   if (entityIds.length === 0) return [];
   return tllRepository.chainsFor(userId, entityIds);
 }

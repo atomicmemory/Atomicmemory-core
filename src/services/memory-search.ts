@@ -23,7 +23,7 @@ import {
   resolveRelevanceGate,
   type RelevanceFilterDecision,
 } from './relevance-policy.js';
-import { shouldUseTLL, expandViaTLL } from './tll-retrieval.js';
+import { shouldUseTLL, expandViaTLL, TLL_ENTITY_LOOKUP_SEED_LIMIT } from './tll-retrieval.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
 
@@ -136,7 +136,7 @@ async function maybeExpandViaTLL(
     return [];
   }
   try {
-    const initialIds = memories.slice(0, TLL_SEED_CANDIDATE_COUNT).map((m) => m.id);
+    const initialIds = memories.slice(0, TLL_ENTITY_LOOKUP_SEED_LIMIT).map((m) => m.id);
     const chainIds = await expandViaTLL(userId, initialIds, deps.tllRepository, deps.stores.pool);
     const knownIds = new Set(memories.map((m) => m.id));
     const newIds = chainIds.filter((id) => !knownIds.has(id)).slice(0, effectiveLimit);
@@ -150,9 +150,6 @@ async function maybeExpandViaTLL(
     return [];
   }
 }
-
-/** Number of top similarity-ranked results that seed TLL chain expansion. */
-const TLL_SEED_CANDIDATE_COUNT = 10;
 
 /**
  * Direct SQL hydration into SearchResult shape — bypasses store

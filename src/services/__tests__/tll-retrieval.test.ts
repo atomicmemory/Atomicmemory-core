@@ -16,6 +16,7 @@ import {
   shouldUseTLL,
   entitiesForMemories,
   expandViaTLL,
+  TLL_ENTITY_LOOKUP_SEED_LIMIT,
 } from '../tll-retrieval.js';
 import type { TllRepository } from '../../db/repository-tll.js';
 
@@ -173,21 +174,24 @@ describe('expandViaTLL', () => {
     expect(chainsFor).toHaveBeenCalledWith(USER, ['e-1', 'e-2']);
   });
 
-  it('slices initialMemoryIds to the first 10 before entity lookup', async () => {
+  it('slices initialMemoryIds to TLL_ENTITY_LOOKUP_SEED_LIMIT before entity lookup', async () => {
     const { pool, query } = makePool([{ entity_id: 'e-1' }]);
     const { repo } = makeTllRepo(['mem-x']);
 
-    const inputIds = Array.from({ length: 25 }, (_, i) => `m-${i}`);
+    const inputIds = Array.from(
+      { length: TLL_ENTITY_LOOKUP_SEED_LIMIT * 2 + 5 },
+      (_, i) => `m-${i}`,
+    );
     await expandViaTLL(USER, inputIds, repo, pool);
 
     expect(query).toHaveBeenCalledTimes(1);
     const params = query.mock.calls[0][1] as unknown[];
     const passedIds = params[0] as string[];
-    expect(passedIds).toHaveLength(10);
-    expect(passedIds).toEqual(inputIds.slice(0, 10));
+    expect(passedIds).toHaveLength(TLL_ENTITY_LOOKUP_SEED_LIMIT);
+    expect(passedIds).toEqual(inputIds.slice(0, TLL_ENTITY_LOOKUP_SEED_LIMIT));
   });
 
-  it('does not slice when initialMemoryIds length is <= 10', async () => {
+  it('does not slice when initialMemoryIds length is <= TLL_ENTITY_LOOKUP_SEED_LIMIT', async () => {
     const { pool, query } = makePool([{ entity_id: 'e-1' }]);
     const { repo } = makeTllRepo(['mem-x']);
 
