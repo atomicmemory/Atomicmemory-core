@@ -6,9 +6,6 @@
  * paying the full graph-DB cost. Each new memory referencing an entity
  * appends an event node; the predecessor pointer lets us traverse the
  * chain backward at query time for EO/MSR/TR questions.
- *
- * The CROME proposal calls this primitive necessary for temporal reasoning
- * at 10M scale; Mem0 explicitly admits their architecture lacks it.
  */
 
 import pg from 'pg';
@@ -20,6 +17,10 @@ export interface TLLEvent {
   positionInChain: number;
 }
 
+// Stable namespace for pg_advisory_xact_lock keying. Keeps TLL appends from
+// colliding with unrelated advisory-lock callers in the same process.
+const TLL_ADVISORY_LOCK_NAMESPACE = 0x544c4c00; // "TLL\0"
+
 export class TllRepository {
   constructor(private pool: pg.Pool) {}
 
@@ -27,6 +28,14 @@ export class TllRepository {
    * Append an event node to each entity's chain. Idempotent on
    * (user_id, entity_id, memory_id). Predecessor is the most-recent
    * existing event for the entity; position is len(chain).
+   *
+   * Race-safety: each (user_id, entity_id) append runs inside a transaction
+   * guarded by `pg_advisory_xact_lock`. Concurrent appends targeting the
+   * same chain serialize on the lock, then compute the next position from
+   * committed rows via INSERT...SELECT. The
+   * `(user_id, entity_id, position_in_chain)` unique index is the
+   * defense-in-depth backstop that fails loudly if any caller bypasses the
+   * lock path.
    */
   async append(
     userId: string,
@@ -37,47 +46,59 @@ export class TllRepository {
     if (entityIds.length === 0) return;
     const uniqueEntities = [...new Set(entityIds)];
 
-    // Find current chain tip per entity in one query
-    const tipResult = await this.pool.query(
-      `SELECT entity_id,
-              memory_id AS predecessor_memory_id,
-              position_in_chain
-       FROM temporal_linkage_list t1
-       WHERE user_id = $1 AND entity_id = ANY($2::uuid[])
-         AND position_in_chain = (
-           SELECT MAX(position_in_chain)
-           FROM temporal_linkage_list t2
-           WHERE t2.user_id = t1.user_id AND t2.entity_id = t1.entity_id
-         )`,
-      [userId, uniqueEntities],
-    );
-    const tips = new Map<string, { predecessorId: string; position: number }>();
-    for (const row of tipResult.rows) {
-      tips.set(row.entity_id, {
-        predecessorId: row.predecessor_memory_id,
-        position: row.position_in_chain,
-      });
-    }
-
-    // Batch insert
-    const values: string[] = [];
-    const params: unknown[] = [];
-    let p = 1;
+    // Per-entity transactions keep the advisory-lock scope narrow and let
+    // independent chains proceed in parallel.
     for (const entityId of uniqueEntities) {
-      const tip = tips.get(entityId);
-      const predecessor = tip ? tip.predecessorId : null;
-      const position = tip ? tip.position + 1 : 0;
-      values.push(`($${p}, $${p + 1}, $${p + 2}, $${p + 3}, $${p + 4}, $${p + 5})`);
-      params.push(userId, entityId, memoryId, predecessor, observationDate, position);
-      p += 6;
+      await this.appendOne(userId, memoryId, entityId, observationDate);
     }
-    await this.pool.query(
-      `INSERT INTO temporal_linkage_list
-        (user_id, entity_id, memory_id, predecessor_memory_id, observation_date, position_in_chain)
-        VALUES ${values.join(', ')}
-        ON CONFLICT (user_id, entity_id, memory_id) DO NOTHING`,
-      params,
-    );
+  }
+
+  /**
+   * Append one (entity, memory) row under an advisory lock keyed on the
+   * chain. The INSERT...SELECT computes predecessor + position inline from
+   * the latest committed row, so the read-then-write window the previous
+   * implementation exposed cannot reorder concurrent appends.
+   */
+  private async appendOne(
+    userId: string,
+    memoryId: string,
+    entityId: string,
+    observationDate: Date,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [
+        TLL_ADVISORY_LOCK_NAMESPACE,
+        `${userId}:${entityId}`,
+      ]);
+      await client.query(
+        `INSERT INTO temporal_linkage_list
+           (user_id, entity_id, memory_id, predecessor_memory_id,
+            observation_date, position_in_chain)
+         SELECT
+           $1, $2, $3,
+           (SELECT memory_id FROM temporal_linkage_list
+              WHERE user_id = $1 AND entity_id = $2
+              ORDER BY position_in_chain DESC LIMIT 1),
+           $4,
+           COALESCE(
+             (SELECT MAX(position_in_chain) FROM temporal_linkage_list
+                WHERE user_id = $1 AND entity_id = $2),
+             -1
+           ) + 1
+         ON CONFLICT (user_id, entity_id, memory_id) DO NOTHING`,
+        [userId, entityId, memoryId, observationDate],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch((rollbackErr) =>
+        console.error('[tll] rollback failed:', rollbackErr instanceof Error ? rollbackErr.message : rollbackErr),
+      );
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /**

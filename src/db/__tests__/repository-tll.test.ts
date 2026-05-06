@@ -124,6 +124,27 @@ describe('TllRepository', () => {
 
       expect(await countRows(ent.id, mem.id)).toBe(1);
     });
+
+    it('serializes concurrent appends to the same chain without duplicate positions', async () => {
+      const ent = await makeEntity('Concurrent', 121);
+      const mA = await makeMemory('concA', 122, new Date('2026-05-01'));
+      const mB = await makeMemory('concB', 123, new Date('2026-05-02'));
+      const mC = await makeMemory('concC', 124, new Date('2026-05-03'));
+
+      await Promise.all([
+        tllRepo.append(TEST_USER, mA.id, [ent.id], mA.date),
+        tllRepo.append(TEST_USER, mB.id, [ent.id], mB.date),
+        tllRepo.append(TEST_USER, mC.id, [ent.id], mC.date),
+      ]);
+
+      const events = await tllRepo.chain(TEST_USER, ent.id);
+      expect(events).toHaveLength(3);
+      expect(events.map((e) => e.positionInChain)).toEqual([0, 1, 2]);
+      expect(new Set(events.map((e) => e.memoryId)).size).toBe(3);
+      expect(events[0].predecessorMemoryId).toBeNull();
+      expect(events[1].predecessorMemoryId).toBe(events[0].memoryId);
+      expect(events[2].predecessorMemoryId).toBe(events[1].memoryId);
+    });
   });
 
   describe('chain()', () => {

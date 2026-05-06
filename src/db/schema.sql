@@ -346,6 +346,13 @@ CREATE INDEX IF NOT EXISTS idx_tll_entity_chain
 CREATE INDEX IF NOT EXISTS idx_tll_memory
   ON temporal_linkage_list (memory_id);
 
+-- Defense-in-depth: unique (chain, position) so any future code path that
+-- bypasses the advisory-lock append fails at the DB layer instead of
+-- silently producing duplicate positions. Idempotent for fresh and
+-- existing schemas.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tll_chain_position_unique
+  ON temporal_linkage_list (user_id, entity_id, position_in_chain);
+
 -- =====================================================================
 -- First-mention events (chronological topic-introduction list)
 -- =====================================================================
