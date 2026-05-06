@@ -13,6 +13,17 @@
 #   npx fallow dupes  --save-baseline=.fallow/dupes-baseline.json
 BASE=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
 BASE=${BASE:-origin/main}
+# Git sets GIT_INDEX_FILE/GIT_DIR before invoking pre-commit hooks. Fallow's
+# `git worktree add` for base-ref scanning performs a checkout that writes
+# to GIT_INDEX_FILE if it is set — which corrupts the main worktree's index
+# by replacing it with the base ref's tree (silently deleting files the
+# feature branch added that don't exist on the base ref, then committing
+# those deletions). Reproduced on this repo's worktrees during the PR #18
+# review-response work. Unset both vars so any nested git invocation runs
+# against the worktree's own default index. (Same fix lives at
+# atomicmemory-benchmarks `.husky/pre-commit` commit `327326a`.)
+unset GIT_INDEX_FILE
+unset GIT_DIR
 npx fallow audit \
   --health-baseline=.fallow/health-baseline.json \
   --dupes-baseline=.fallow/dupes-baseline.json \
