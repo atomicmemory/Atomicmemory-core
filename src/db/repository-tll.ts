@@ -102,22 +102,40 @@ export class TllRepository {
   }
 
   /**
-   * Get the full event chain for an entity, ordered chronologically.
-   * Used for "list events in order" (EO) and "how did X evolve" (TR/MSR).
+   * Get the full event chain for an entity, ordered by observation_date
+   * (the conversation timestamp). Used for EO/TR/MSR queries that need
+   * chronological order — a backfilled event with an earlier
+   * observation_date surfaces in its true chronological position even
+   * though it was inserted last.
+   *
+   * `positionInChain` returned here is the 0-based chronological rank,
+   * derived via `ROW_NUMBER()` over the chronological order. The stored
+   * `position_in_chain` column is insertion-order audit metadata and is
+   * not exposed by this API. `predecessorMemoryId` is the immediate
+   * chronologically-prior memory (via `LAG()`) — also chronological,
+   * not the position-tip predecessor recorded at insert time.
+   *
+   * Tiebreaker for events sharing an `observation_date` (e.g. the same
+   * conversation timestamp) is the stored `position_in_chain` (insertion
+   * order), keeping the result deterministic.
    */
   async chain(userId: string, entityId: string): Promise<TLLEvent[]> {
     const result = await this.pool.query(
-      `SELECT memory_id, predecessor_memory_id, observation_date, position_in_chain
+      `SELECT memory_id,
+              observation_date,
+              LAG(memory_id) OVER w AS chronological_predecessor,
+              ROW_NUMBER() OVER w - 1 AS chronological_position
        FROM temporal_linkage_list
        WHERE user_id = $1 AND entity_id = $2
-       ORDER BY position_in_chain ASC`,
+       WINDOW w AS (ORDER BY observation_date ASC, position_in_chain ASC)
+       ORDER BY observation_date ASC, position_in_chain ASC`,
       [userId, entityId],
     );
     return result.rows.map((row) => ({
       memoryId: row.memory_id,
-      predecessorMemoryId: row.predecessor_memory_id,
+      predecessorMemoryId: row.chronological_predecessor ?? null,
       observationDate: row.observation_date,
-      positionInChain: row.position_in_chain,
+      positionInChain: Number(row.chronological_position),
     }));
   }
 
@@ -144,7 +162,11 @@ export class TllRepository {
    * by EO-shaped read paths that need content alongside chain position.
    *
    * Returns one entry per entity; entities with no events are dropped.
-   * Within an entity, events are ordered by position_in_chain ASC.
+   * Within an entity, events are ordered by `observation_date` (the
+   * conversation timestamp), not insertion order — see `chain()` for
+   * the rationale and the `LAG`/`ROW_NUMBER` derivation of
+   * `predecessorMemoryId` and `positionInChain`. Tiebreaker for events
+   * sharing an observation_date is the stored insertion `position_in_chain`.
    */
   async chainEventsForEntities(
     userId: string,
@@ -161,12 +183,15 @@ export class TllRepository {
   }>> {
     if (entityIds.length === 0) return [];
     const unique = [...new Set(entityIds)];
+    // `m.workspace_id IS NULL` — this is the global event-chain endpoint;
+    // workspace-scoped memories must not surface here even if they share
+    // an entity with a global memory.
     const result = await this.pool.query(
       `SELECT t.entity_id,
               t.memory_id,
-              t.predecessor_memory_id,
               t.observation_date,
-              t.position_in_chain,
+              LAG(t.memory_id) OVER w AS chronological_predecessor,
+              ROW_NUMBER() OVER w - 1 AS chronological_position,
               m.content
        FROM temporal_linkage_list t
        JOIN memories m ON m.id = t.memory_id
@@ -174,7 +199,12 @@ export class TllRepository {
          AND t.entity_id = ANY($2::uuid[])
          AND m.deleted_at IS NULL
          AND m.status = 'active'
-       ORDER BY t.entity_id, t.position_in_chain ASC`,
+         AND m.workspace_id IS NULL
+       WINDOW w AS (
+         PARTITION BY t.entity_id
+         ORDER BY t.observation_date ASC, t.position_in_chain ASC
+       )
+       ORDER BY t.entity_id, t.observation_date ASC, t.position_in_chain ASC`,
       [userId, unique],
     );
     const grouped = new Map<string, Array<{
@@ -190,8 +220,8 @@ export class TllRepository {
         memoryId: row.memory_id,
         content: row.content,
         observationDate: row.observation_date,
-        positionInChain: row.position_in_chain,
-        predecessorMemoryId: row.predecessor_memory_id,
+        positionInChain: Number(row.chronological_position),
+        predecessorMemoryId: row.chronological_predecessor ?? null,
       });
       grouped.set(row.entity_id, list);
     }

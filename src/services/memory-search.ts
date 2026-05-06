@@ -21,26 +21,11 @@ import { recordSearchSideEffects } from './retrieval-side-effects.js';
 import {
   applyRelevanceFilter,
   resolveRelevanceGate,
-  type RelevanceFilterDecision,
 } from './relevance-policy.js';
-import { shouldUseTLL, expandViaTLL, TLL_ENTITY_LOOKUP_SEED_LIMIT } from './tll-retrieval.js';
+import { appendTllAugmentation } from './tll-augmentation.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
-
-interface RelevanceFilterSummary {
-  threshold: number | null;
-  source: string;
-  reason: string;
-  queryLabel: string;
-  removedIds: string[];
-  decisions: RelevanceFilterDecision[];
-}
-
-interface PostProcessedSearch {
-  memories: SearchResult[];
-  consensusResult?: ConsensusResult;
-  relevanceFilter: RelevanceFilterSummary;
-}
+import type { PostProcessedSearch, RelevanceFilterSummary } from './memory-search-types.js';
 
 interface PackagedSearchOutput {
   mode: RetrievalResult['retrievalMode'];
@@ -116,98 +101,6 @@ async function executeSearchStep(
   // around the post-pipeline relevance gate (see appendChainAugmentation
   // callsite in performSearch). Pipeline-filtered rows stay first.
   return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace };
-}
-
-/**
- * Outcome of a TLL expansion attempt. `failed` flips to true only when
- * an error is caught — empty `memories` with `failed: false` means the
- * gate ran cleanly but produced no augmentation (no entities, all chain
- * memories already in the candidate set, etc).
- *
- * Threaded back through `appendTllAugmentation` so the retrieval trace
- * can record `tll_expansion_failed` instead of silently swallowing the
- * exception.
- */
-interface TllExpansionResult {
-  memories: SearchResult[];
-  failed: boolean;
-  errorMessage?: string;
-}
-
-/**
- * TLL retrieval signal. For ordering/temporal/multi-session queries, expand
- * the candidate set by traversing entity event chains. Returns hydrated
- * SearchResult rows tagged with `retrieval_signal: 'tll-chain'` so the
- * relevance gate can recognize them as non-similarity-scored augmentations.
- *
- * Fail-open by design: chain expansion errors never block primary
- * retrieval. The deliberate fallback is to log the error with a
- * structured `[tll-expansion-failed]` prefix and surface a
- * `tll_expansion_failed` event on the retrieval trace so the failure is
- * observable rather than lost.
- */
-async function maybeExpandViaTLL(
-  deps: MemoryServiceDeps,
-  userId: string,
-  query: string,
-  memories: SearchResult[],
-  effectiveLimit: number,
-): Promise<TllExpansionResult> {
-  if (!deps.tllRepository || memories.length === 0 || !shouldUseTLL(query)) {
-    return { memories: [], failed: false };
-  }
-  try {
-    const initialIds = memories.slice(0, TLL_ENTITY_LOOKUP_SEED_LIMIT).map((m) => m.id);
-    const chainIds = await expandViaTLL(userId, initialIds, deps.tllRepository, deps.stores.pool);
-    const knownIds = new Set(memories.map((m) => m.id));
-    const newIds = chainIds.filter((id) => !knownIds.has(id)).slice(0, effectiveLimit);
-    if (newIds.length === 0) return { memories: [], failed: false };
-    const hydrated = await hydrateChainMemories(deps, userId, newIds);
-    console.log(`[tll-retrieval] expanded ${newIds.length} chain memories for ordering query`);
-    return { memories: hydrated, failed: false };
-  } catch (err) {
-    // Fail-open: TLL is augmentation, never block primary retrieval.
-    // Structured prefix `[tll-expansion-failed]` lets log scrapers
-    // pick this up as a distinct failure class. The retrieval-trace
-    // event is added by the caller (see `appendTllAugmentation`).
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error('[tll-expansion-failed]', errorMessage);
-    return { memories: [], failed: true, errorMessage };
-  }
-}
-
-/**
- * Direct SQL hydration into SearchResult shape — bypasses store
- * abstraction since this is a deterministic chain-traversal augmentation,
- * not a similarity search. Rows are tagged with `retrieval_signal:
- * 'tll-chain'` and carry `similarity: null` so the relevance gate can
- * skip them rather than score them against semantic similarity.
- */
-async function hydrateChainMemories(
-  deps: MemoryServiceDeps,
-  userId: string,
-  newIds: string[],
-): Promise<SearchResult[]> {
-  const hydratedRes = await deps.stores.pool.query<{ id: string; content: string; created_at: Date; importance: number; namespace: string | null }>(
-    `SELECT id, content, created_at, importance, namespace
-     FROM memories
-     WHERE user_id = $1 AND id = ANY($2::uuid[])
-       AND deleted_at IS NULL AND status = 'active'`,
-    [userId, newIds],
-  );
-  return hydratedRes.rows.map((r) => ({
-    id: r.id,
-    content: r.content,
-    similarity: null,
-    retrieval_signal: 'tll-chain',
-    created_at: r.created_at,
-    importance: Number(r.importance),
-    namespace: r.namespace,
-    tags: [],
-    keywords: [],
-    workspace_id: null,
-    agent_id: null,
-  } as unknown as SearchResult));
 }
 
 /** Filter workspace-scoped, stale composites, and consensus-violating memories. */
@@ -402,45 +295,6 @@ export async function performSearch(
   );
   const augmented = await appendTllAugmentation(deps, userId, query, filteredMemories, effectiveLimit, activeTrace);
   return assembleResponse(deps, augmented, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
-}
-
-/**
- * Append TLL chain-membership augmentations after the relevance gate. The
- * augmented rows ride around the similarity threshold because chain
- * membership is a structurally different signal — they have no
- * meaningful similarity score against the query.
- */
-async function appendTllAugmentation(
-  deps: MemoryServiceDeps,
-  userId: string,
-  query: string,
-  postProcessed: PostProcessedSearch,
-  effectiveLimit: number,
-  activeTrace: TraceCollector,
-): Promise<PostProcessedSearch> {
-  const result = await maybeExpandViaTLL(
-    deps,
-    userId,
-    query,
-    postProcessed.memories,
-    effectiveLimit,
-  );
-  // Surface the fail-open path on the retrieval trace as a distinct
-  // event so the failure is observable in trace artifacts even when no
-  // augmentation rows are produced. Pairs with the structured
-  // `[tll-expansion-failed]` log line emitted by `maybeExpandViaTLL`.
-  if (result.failed) {
-    activeTrace.event('tll_expansion_failed', { errorMessage: result.errorMessage });
-  }
-  if (result.memories.length === 0) return postProcessed;
-  activeTrace.stage('tll-augmentation', [...postProcessed.memories, ...result.memories], {
-    addedCount: result.memories.length,
-    addedIds: result.memories.map((m) => m.id),
-  });
-  return {
-    ...postProcessed,
-    memories: [...postProcessed.memories, ...result.memories],
-  };
 }
 
 /**

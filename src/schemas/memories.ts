@@ -586,7 +586,11 @@ export const FirstMentionsExtractBodySchema = z
     user_id: z.string().min(1),
     conversation_text: z.string().min(1).max(MAX_CONVERSATION_LENGTH),
     source_site: z.string().min(1),
-    memory_ids_by_turn_id: z.record(z.string(), z.string()),
+    // Values must be UUIDs — they're inserted into a UUID column
+    // (`first_mention_events.memory_id`). Validate at the schema layer so a
+    // bad value returns 400 instead of leaking a Postgres "invalid input
+    // syntax for type uuid" error as a 500.
+    memory_ids_by_turn_id: z.record(z.string(), z.string().uuid()),
   })
   .transform(b => {
     const map = new Map<number, string>();

@@ -272,6 +272,19 @@ describe('POST /memories/first-mentions/extract — schema validation', () => {
     });
     expect(error).toMatch(/source_site/i);
   });
+
+  it('returns 400 (not 500) when a memory_ids_by_turn_id value is not a UUID', async () => {
+    // Without schema-layer UUID validation, a bad value reaches Postgres
+    // and crashes with "invalid input syntax for type uuid", which the
+    // route handler maps to 500. The schema must reject it as 400 instead.
+    const { error } = await postExpecting400({
+      user_id: TEST_USER,
+      conversation_text: 'hi',
+      source_site: 'beam',
+      memory_ids_by_turn_id: { '1': INVALID_UUID },
+    });
+    expect(error).toMatch(/memory_ids_by_turn_id/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -66,6 +66,25 @@ describe('TllRepository', () => {
     return { id, date };
   }
 
+  /**
+   * Store a workspace-scoped memory. Used to verify that the global
+   * `chainEventsForEntities` endpoint never surfaces workspace memories.
+   * Any non-null UUID for `workspaceId` is sufficient for the
+   * `workspace_id IS NULL` filter to drop the row.
+   */
+  async function makeWorkspaceMemory(content: string, seed: number, date: Date): Promise<SeededMemory> {
+    const id = await memoryRepo.storeMemory({
+      userId: TEST_USER,
+      content,
+      embedding: unitVector(seed),
+      importance: 0.6,
+      sourceSite: 'test',
+      workspaceId: '00000000-0000-0000-0000-00000000ffff',
+      agentId: '00000000-0000-0000-0000-0000000000aa',
+    });
+    return { id, date };
+  }
+
   /** Count rows in TLL for a (user, entity, memory) triple. */
   async function countRows(entityId: string, memoryId: string): Promise<number> {
     const r = await pool.query<{ c: string }>(
@@ -169,6 +188,22 @@ describe('TllRepository', () => {
       const events = await tllRepo.chain(TEST_USER, ent.id);
       expect(events).toEqual([]);
     });
+
+    it('orders by observation_date — backfilled out-of-order events get chronological positions and predecessors', async () => {
+      const ent = await makeEntity('BackfillChain', 56);
+      const middle = await makeMemory('mid', 57, new Date('2026-02-01'));
+      const latest = await makeMemory('late', 58, new Date('2026-03-01'));
+      const earliest = await makeMemory('early', 59, new Date('2026-01-01'));
+
+      await tllRepo.append(TEST_USER, middle.id, [ent.id], middle.date);
+      await tllRepo.append(TEST_USER, latest.id, [ent.id], latest.date);
+      await tllRepo.append(TEST_USER, earliest.id, [ent.id], earliest.date);
+
+      const events = await tllRepo.chain(TEST_USER, ent.id);
+      expect(events.map((e) => e.memoryId)).toEqual([earliest.id, middle.id, latest.id]);
+      expect(events.map((e) => e.positionInChain)).toEqual([0, 1, 2]);
+      expect(events.map((e) => e.predecessorMemoryId)).toEqual([null, earliest.id, middle.id]);
+    });
   });
 
   describe('chainsFor()', () => {
@@ -260,6 +295,40 @@ describe('TllRepository', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].events.map((e) => e.memoryId)).toEqual([live.id]);
+    });
+
+    it('orders backfilled events by observation_date with chronological predecessors', async () => {
+      const ent = await makeEntity('Backfill', 111);
+      // Insertion order: middle, latest, earliest. Observation order: jan, feb, mar.
+      const middle = await makeMemory('middle', 112, new Date('2026-02-01'));
+      const latest = await makeMemory('latest', 113, new Date('2026-03-01'));
+      const earliest = await makeMemory('earliest', 114, new Date('2026-01-01'));
+
+      await tllRepo.append(TEST_USER, middle.id, [ent.id], middle.date);
+      await tllRepo.append(TEST_USER, latest.id, [ent.id], latest.date);
+      await tllRepo.append(TEST_USER, earliest.id, [ent.id], earliest.date);
+
+      const result = await tllRepo.chainEventsForEntities(TEST_USER, [ent.id]);
+      expect(result).toHaveLength(1);
+      const events = result[0].events;
+      expect(events.map((e) => e.memoryId)).toEqual([earliest.id, middle.id, latest.id]);
+      expect(events.map((e) => e.positionInChain)).toEqual([0, 1, 2]);
+      expect(events[0].predecessorMemoryId).toBeNull();
+      expect(events[1].predecessorMemoryId).toBe(earliest.id);
+      expect(events[2].predecessorMemoryId).toBe(middle.id);
+    });
+
+    it('omits events whose memory has a non-null workspace_id (global endpoint isolation)', async () => {
+      const ent = await makeEntity('GlobalEntity', 121);
+      const global = await makeMemory('global memory', 122, new Date('2026-01-01'));
+      const workspaceMem = await makeWorkspaceMemory('workspace memory', 123, new Date('2026-02-01'));
+
+      await tllRepo.append(TEST_USER, global.id, [ent.id], global.date);
+      await tllRepo.append(TEST_USER, workspaceMem.id, [ent.id], workspaceMem.date);
+
+      const result = await tllRepo.chainEventsForEntities(TEST_USER, [ent.id]);
+      expect(result).toHaveLength(1);
+      expect(result[0].events.map((e) => e.memoryId)).toEqual([global.id]);
     });
   });
 });
