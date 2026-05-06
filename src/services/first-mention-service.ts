@@ -109,8 +109,8 @@ function extractJsonArray(text: string): unknown[] | null {
   const trimmed = text.trim();
   const start = trimmed.indexOf('[');
   if (start < 0) {
-    process.stderr.write(
-      `  ⚠ first-mentions: no opening [ in response (text len=${trimmed.length})\n`,
+    console.error(
+      `[first-mention-llm-failed] no opening [ in response (text len=${trimmed.length})`,
     );
     return null;
   }
@@ -119,8 +119,8 @@ function extractJsonArray(text: string): unknown[] | null {
   if (end <= start) {
     const salvaged = salvageJsonArray(trimmed);
     if (!salvaged) return null;
-    process.stderr.write(
-      `  ⚠ first-mentions: response truncated; salvaged ${salvaged.length} chars\n`,
+    console.warn(
+      `[first-mention-llm-salvaged] response truncated; salvaged ${salvaged.length} chars`,
     );
     jsonSlice = salvaged;
   } else {
@@ -128,8 +128,8 @@ function extractJsonArray(text: string): unknown[] | null {
   }
   const parsed: unknown = JSON.parse(jsonSlice);
   if (!Array.isArray(parsed)) {
-    process.stderr.write(
-      `  ⚠ first-mentions: parsed JSON is not an array (type=${typeof parsed})\n`,
+    console.error(
+      `[first-mention-llm-failed] parsed JSON is not an array (type=${typeof parsed})`,
     );
     return null;
   }
@@ -166,7 +166,16 @@ export class FirstMentionService {
     return events;
   }
 
-  /** Run the extraction LLM call; return parsed array or null on failure. */
+  /**
+   * Run the extraction LLM call; return parsed array or null on failure.
+   *
+   * Fail-open by design: a flaky upstream LLM call should not crash the
+   * caller's `extractAndStore` invocation; the EO read path treats a
+   * missing first-mention list as "no signal" rather than a hard
+   * failure. The deliberate fallback is a structured
+   * `[first-mention-llm-failed]` log line plus null return so the
+   * failure is observable.
+   */
   private async invokeLlm(conversationText: string): Promise<unknown[] | null> {
     let rawText = '';
     try {
@@ -179,10 +188,10 @@ export class FirstMentionService {
       return extractJsonArray(rawText);
     } catch (err) {
       const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
-      process.stderr.write(`  ⚠ first-mentions extraction failed: ${msg}\n`);
+      console.error(`[first-mention-llm-failed] ${msg}`);
       if (rawText) {
-        process.stderr.write(
-          `  ⚠ raw response (first 500 chars): ${rawText.slice(0, 500).replace(/\n/g, ' ')}\n`,
+        console.error(
+          `[first-mention-llm-failed] raw response (first 500 chars): ${rawText.slice(0, 500).replace(/\n/g, ' ')}`,
         );
       }
       return null;
@@ -209,8 +218,8 @@ export class FirstMentionService {
     }
     events.sort((a, b) => a.positionInConversation - b.positionInConversation);
     if (events.length === 0 && filtered.length > 0) {
-      process.stderr.write(
-        `  ⚠ first-mentions: ${filtered.length} parsed entries had no matching memory_id\n`,
+      console.warn(
+        `[first-mention-mapping] ${filtered.length} parsed entries had no matching memory_id`,
       );
     }
     return events;

@@ -119,11 +119,32 @@ async function executeSearchStep(
 }
 
 /**
+ * Outcome of a TLL expansion attempt. `failed` flips to true only when
+ * an error is caught — empty `memories` with `failed: false` means the
+ * gate ran cleanly but produced no augmentation (no entities, all chain
+ * memories already in the candidate set, etc).
+ *
+ * Threaded back through `appendTllAugmentation` so the retrieval trace
+ * can record `tll_expansion_failed` instead of silently swallowing the
+ * exception.
+ */
+interface TllExpansionResult {
+  memories: SearchResult[];
+  failed: boolean;
+  errorMessage?: string;
+}
+
+/**
  * TLL retrieval signal. For ordering/temporal/multi-session queries, expand
  * the candidate set by traversing entity event chains. Returns hydrated
  * SearchResult rows tagged with `retrieval_signal: 'tll-chain'` so the
  * relevance gate can recognize them as non-similarity-scored augmentations.
- * Fail-open: chain expansion errors don't block primary retrieval.
+ *
+ * Fail-open by design: chain expansion errors never block primary
+ * retrieval. The deliberate fallback is to log the error with a
+ * structured `[tll-expansion-failed]` prefix and surface a
+ * `tll_expansion_failed` event on the retrieval trace so the failure is
+ * observable rather than lost.
  */
 async function maybeExpandViaTLL(
   deps: MemoryServiceDeps,
@@ -131,23 +152,27 @@ async function maybeExpandViaTLL(
   query: string,
   memories: SearchResult[],
   effectiveLimit: number,
-): Promise<SearchResult[]> {
+): Promise<TllExpansionResult> {
   if (!deps.tllRepository || memories.length === 0 || !shouldUseTLL(query)) {
-    return [];
+    return { memories: [], failed: false };
   }
   try {
     const initialIds = memories.slice(0, TLL_ENTITY_LOOKUP_SEED_LIMIT).map((m) => m.id);
     const chainIds = await expandViaTLL(userId, initialIds, deps.tllRepository, deps.stores.pool);
     const knownIds = new Set(memories.map((m) => m.id));
     const newIds = chainIds.filter((id) => !knownIds.has(id)).slice(0, effectiveLimit);
-    if (newIds.length === 0) return [];
+    if (newIds.length === 0) return { memories: [], failed: false };
     const hydrated = await hydrateChainMemories(deps, userId, newIds);
     console.log(`[tll-retrieval] expanded ${newIds.length} chain memories for ordering query`);
-    return hydrated;
+    return { memories: hydrated, failed: false };
   } catch (err) {
-    // Fail-open: TLL is augmentation; never block primary retrieval
-    console.error('[tll-retrieval] expansion failed:', err instanceof Error ? err.message : err);
-    return [];
+    // Fail-open: TLL is augmentation, never block primary retrieval.
+    // Structured prefix `[tll-expansion-failed]` lets log scrapers
+    // pick this up as a distinct failure class. The retrieval-trace
+    // event is added by the caller (see `appendTllAugmentation`).
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('[tll-expansion-failed]', errorMessage);
+    return { memories: [], failed: true, errorMessage };
   }
 }
 
@@ -393,13 +418,29 @@ async function appendTllAugmentation(
   effectiveLimit: number,
   activeTrace: TraceCollector,
 ): Promise<PostProcessedSearch> {
-  const augment = await maybeExpandViaTLL(deps, userId, query, postProcessed.memories, effectiveLimit);
-  if (augment.length === 0) return postProcessed;
-  activeTrace.stage('tll-augmentation', [...postProcessed.memories, ...augment], {
-    addedCount: augment.length,
-    addedIds: augment.map((m) => m.id),
+  const result = await maybeExpandViaTLL(
+    deps,
+    userId,
+    query,
+    postProcessed.memories,
+    effectiveLimit,
+  );
+  // Surface the fail-open path on the retrieval trace as a distinct
+  // event so the failure is observable in trace artifacts even when no
+  // augmentation rows are produced. Pairs with the structured
+  // `[tll-expansion-failed]` log line emitted by `maybeExpandViaTLL`.
+  if (result.failed) {
+    activeTrace.event('tll_expansion_failed', { errorMessage: result.errorMessage });
+  }
+  if (result.memories.length === 0) return postProcessed;
+  activeTrace.stage('tll-augmentation', [...postProcessed.memories, ...result.memories], {
+    addedCount: result.memories.length,
+    addedIds: result.memories.map((m) => m.id),
   });
-  return { ...postProcessed, memories: [...postProcessed.memories, ...augment] };
+  return {
+    ...postProcessed,
+    memories: [...postProcessed.memories, ...result.memories],
+  };
 }
 
 /**

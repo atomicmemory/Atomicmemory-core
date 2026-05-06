@@ -242,10 +242,18 @@ async function maybeAppendTll(
   if (entityIds.length === 0) return;
 
   const observationDate = await resolveTllObservationDate(deps, userId, memoryId, logicalTimestamp);
+  // Fire-and-forget: TLL append is best-effort augmentation of the
+  // ingest hot path. A failure here should NOT block ingest, which is
+  // why we deliberately drop the promise. The `[tll-append-failed]`
+  // structured prefix is what observability tooling greps for; pair
+  // with `tll_expansion_failed` on the read path.
   deps.tllRepository
     .append(userId, memoryId, entityIds, observationDate)
     .catch((err) =>
-      console.error('[tll] append failed:', err instanceof Error ? err.message : err),
+      console.error(
+        '[tll-append-failed]',
+        err instanceof Error ? err.message : String(err),
+      ),
     );
 }
 
