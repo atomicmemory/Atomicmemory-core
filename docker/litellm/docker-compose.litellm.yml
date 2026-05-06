@@ -1,0 +1,64 @@
+# LiteLLM proxy as a sidecar service for AtomicMemory.
+#
+# Runs at http://localhost:4000 by default — distinct from the core dev
+# server (3050) and the docker-compose.yml app service (also 3050) so the
+# two can run side-by-side. Provider credentials are pulled from the host
+# environment (or a .env in this directory) and resolved by the proxy at
+# request time per `os.environ/...` references in litellm-config.yaml.
+#
+# Up:    docker compose -f docker/litellm/docker-compose.litellm.yml up -d
+# Logs:  docker compose -f docker/litellm/docker-compose.litellm.yml logs -f litellm
+# Down:  docker compose -f docker/litellm/docker-compose.litellm.yml down
+#
+# After the container is healthy, point AtomicMemory at it:
+#   LLM_PROVIDER=openai-compatible
+#   LLM_API_URL=http://localhost:4000
+#   LLM_API_KEY=$LITELLM_MASTER_KEY
+#   LLM_MODEL=anthropic-haiku-4-5     # or any model_name from litellm-config.yaml
+
+# Pin the compose project name so this stack never collides with another
+# `litellm/` directory's compose project. Without this, docker compose
+# derives the project name from the parent directory (`litellm`) which is a
+# very common name and will silently hijack siblings' containers.
+name: atomicmemory-litellm
+
+services:
+  litellm:
+    # Pinned image tag. `main-stable` is BerriAI's rolling stable channel.
+    # Bump explicitly when validating a new version against AtomicMemory.
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: atomicmemory-litellm
+    restart: unless-stopped
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    # Mount the config read-only so accidental writes from inside the
+    # container can't drift it.
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      # Proxy auth — set in your shell or the .env file alongside this compose.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-litellm-master}
+      # Provider credentials. Anything unset just makes the corresponding
+      # model alias 401 at call time; the proxy still starts.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FOUNDRY_API_BASE: ${FOUNDRY_API_BASE:-}
+      FOUNDRY_API_KEY: ${FOUNDRY_API_KEY:-}
+      FOUNDRY_API_VERSION: ${FOUNDRY_API_VERSION:-2024-12-01-preview}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION_NAME: ${AWS_REGION_NAME:-us-east-1}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    healthcheck:
+      # /health/liveliness is the LiteLLM-blessed unauthenticated probe.
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health/liveliness"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
