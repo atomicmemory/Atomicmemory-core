@@ -52,26 +52,33 @@ function makeTllRepo(chainResult: string[]): {
 }
 
 describe('shouldUseTLL', () => {
+  // Canonical EO/MSR/TR question shapes — each fires either via two
+  // ordering terms or via a single structural sequence phrase. The
+  // pre-tightened regex over-fired on single-token ordering hits like
+  // "what is my first name" / "the model used before GPT-4"; the
+  // updated gate trades a few rare single-word matches for sharper
+  // precision on these canonical shapes.
   const positiveQueries = [
-    'in what order did the events happen',
-    'what came first in the sequence',
-    'what was the last meeting about',
-    'what happened before the merger',
-    'what changed after the launch',
+    // SEQUENCE_PATTERNS hits
+    'in what order did I bring up X',
+    'in chronological order list the events',
     'when did the user move to Berlin',
-    'show the evolution of the project',
-    'list events in chronological order',
-    'reconstruct the sequence',
-    'build me a timeline of changes',
-    'what is the history of this codebase',
+    'since when has X been deprecated',
     'how preferences shifted over time',
+    'show the evolution of the project',
+    'what is the history of this codebase',
+    'build me a timeline of changes',
+    'when the topic was brought up',
     'what did the user originally say',
     'what did they initially mention',
-    'first this then that',
-    'and later they switched',
-    'when the topic was brought up',
-    'track the progression of opinion',
     'show progression of editor choice',
+    'how did the architecture evolve',
+    'how have my preferences shifted',
+    // Two ordering terms (co-occurrence)
+    'first this then that',
+    'what aspects did I discuss before vs after the launch',
+    'first the migration, then the rollback',
+    'what came earlier and what came later',
   ];
 
   it.each(positiveQueries)('returns true for ordering query: %s', (q) => {
@@ -79,17 +86,27 @@ describe('shouldUseTLL', () => {
   });
 
   it('matches case-insensitively', () => {
-    expect(shouldUseTLL('What Is The HISTORY?')).toBe(true);
-    expect(shouldUseTLL('TIMELINE please')).toBe(true);
+    expect(shouldUseTLL('What Is The HISTORY OF this?')).toBe(true);
+    expect(shouldUseTLL('TIMELINE OF events please')).toBe(true);
   });
 
   const negativeQueries = [
+    // Non-temporal shapes (existing coverage)
     'what is X',
     'list all the entities',
     'explain why this is a tool',
     'who is the current owner',
     'tell me about the project',
     'summarize the discussion',
+    // False-positive shapes that the prior loose regex incorrectly
+    // matched (review #9). These must stay false under the new gate.
+    'what is my first name',
+    'the model used before GPT-4',
+    'track my spending',
+    'we then moved on to lunch',
+    'what is the next step',
+    'is this the previous version',
+    'what came last in the queue',
   ];
 
   it.each(negativeQueries)('returns false for non-temporal query: %s', (q) => {

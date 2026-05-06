@@ -29,11 +29,57 @@ import type { TllRepository } from '../db/repository-tll.js';
  */
 export const TLL_ENTITY_LOOKUP_SEED_LIMIT = 10;
 
-const ORDERING_QUERY_RE =
-  /\b(order|first|last|before|after|when did|evolution|chronological|sequence|timeline|history|over time|originally|initially|then|later|brought up|track|progression|how did .* evolve|in what order)\b/i;
+/**
+ * Single-token ordering signals. Matched in isolation these are too
+ * weak to gate TLL — "what is my FIRST name", "the model used BEFORE
+ * GPT-4", "we then moved on" all contain one of these but are not
+ * EO/MSR/TR queries. We require either two of them to co-occur, or
+ * one of the structural sequence patterns below, before firing.
+ */
+const ORDERING_TERMS_RE =
+  /\b(first|last|before|after|then|later|earlier|previous|next|prior)\b/gi;
 
+/**
+ * Structural sequence patterns. Each one is a phrase whose presence
+ * unambiguously indicates an ordering / temporal-reasoning question.
+ * Single-pattern hit is enough to gate TLL.
+ *
+ * Curated to keep precision high: "track my spending" and "what is my
+ * first name" must not match any pattern here. Add new patterns
+ * conservatively — a leak here will silently re-introduce the
+ * false-positive class this fix addresses.
+ */
+const SEQUENCE_PATTERNS: readonly RegExp[] = [
+  /\bin (what |the )?(chronological |reverse )?order\b/i,
+  /\b(when|after) did\b/i,
+  /\bsince when\b/i,
+  /\bover time\b/i,
+  /\bevolution of\b/i,
+  /\b(history|timeline) of\b/i,
+  /\bbrought up\b/i,
+  /\b(originally|initially)\b/i,
+  /\bprogression of\b/i,
+  /\bhow .{1,80}(evolved?|shifted?|changed)\b/i,
+  /\bwhat .{1,80}(originally|initially)\b/i,
+];
+
+/**
+ * Returns true if the query has the shape of an event-ordering / temporal
+ * question and should trigger TLL chain expansion. The gate is
+ * intentionally conservative: TLL augmentation is augmentation, not the
+ * primary retrieval path, so over-firing was producing irrelevant chain
+ * memories on plain-fact queries that happened to contain "first",
+ * "before", "track", etc.
+ *
+ * Two ordering terms co-occurring (e.g. "what did I discuss BEFORE and
+ * AFTER X") is a strong-enough signal on its own; one structural
+ * sequence phrase (e.g. "in what order", "evolution of", "since when")
+ * is also strong enough. Single ordering term + nothing else is not.
+ */
 export function shouldUseTLL(query: string): boolean {
-  return ORDERING_QUERY_RE.test(query);
+  const orderingMatches = (query.match(ORDERING_TERMS_RE) ?? []).length;
+  if (orderingMatches >= 2) return true;
+  return SEQUENCE_PATTERNS.some((re) => re.test(query));
 }
 
 /**
