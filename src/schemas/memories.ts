@@ -534,6 +534,76 @@ export const MemoryByIdQuerySchema = z
 
 export type MemoryByIdQuery = z.infer<typeof MemoryByIdQuerySchema>;
 
+/**
+ * Anti-amplification cap for `GET /v1/memories/event-chains`. The endpoint
+ * fans out per entity (one chain hydration each); without an upper bound a
+ * single request can pull tens of thousands of rows.
+ */
+const MAX_ENTITY_IDS_PER_REQUEST = 100;
+
+/**
+ * Query for `GET /v1/memories/event-chains`. Accepts a comma-separated list
+ * of entity UUIDs and returns the per-entity ordered event chain.
+ * `entity_ids` is parsed as comma-separated, trimmed, deduplicated; empty
+ * tokens skipped. At least one valid UUID required, capped at
+ * MAX_ENTITY_IDS_PER_REQUEST entries.
+ */
+export const EventChainsQuerySchema = z
+  .object({
+    user_id: RequiredQueryString,
+    entity_ids: RequiredQueryString,
+  })
+  .transform(q => {
+    const ids = [...new Set(
+      q.entity_ids
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0),
+    )];
+    return { userId: q.user_id, entityIds: ids };
+  })
+  .refine(q => q.entityIds.length > 0, {
+    message: 'entity_ids must contain at least one non-empty value',
+  })
+  .refine(q => q.entityIds.length <= MAX_ENTITY_IDS_PER_REQUEST, {
+    message: `entity_ids must contain at most ${MAX_ENTITY_IDS_PER_REQUEST} values`,
+  })
+  .refine(q => q.entityIds.every(id => UUID_REGEX.test(id)), {
+    message: 'entity_ids entries must be valid UUIDs',
+  });
+
+export type EventChainsQuery = z.infer<typeof EventChainsQuerySchema>;
+
+/**
+ * Body for `POST /v1/memories/first-mentions/extract`. Accepts the full
+ * conversation transcript plus a turn-id-to-memory-id mapping (the harness
+ * provides this — the in-core ingest pipeline does not retain turn
+ * structure). The service runs a single LLM call to identify chronological
+ * topic-introduction events and persists them.
+ */
+export const FirstMentionsExtractBodySchema = z
+  .object({
+    user_id: z.string().min(1),
+    conversation_text: z.string().min(1).max(MAX_CONVERSATION_LENGTH),
+    source_site: z.string().min(1),
+    memory_ids_by_turn_id: z.record(z.string(), z.string()),
+  })
+  .transform(b => {
+    const map = new Map<number, string>();
+    for (const [k, v] of Object.entries(b.memory_ids_by_turn_id)) {
+      const n = Number(k);
+      if (Number.isFinite(n) && Number.isInteger(n)) map.set(n, v);
+    }
+    return {
+      userId: b.user_id,
+      conversationText: b.conversation_text,
+      sourceSite: b.source_site,
+      memoryIdsByTurnId: map,
+    };
+  });
+
+export type FirstMentionsExtractBody = z.infer<typeof FirstMentionsExtractBodySchema>;
+
 // ---------------------------------------------------------------------------
 // Path params
 // ---------------------------------------------------------------------------

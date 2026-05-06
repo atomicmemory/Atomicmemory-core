@@ -24,6 +24,10 @@ import { LinkRepository } from '../db/link-repository.js';
 import { MemoryRepository } from '../db/memory-repository.js';
 import { EntityRepository } from '../db/repository-entities.js';
 import { LessonRepository } from '../db/repository-lessons.js';
+import { TllRepository } from '../db/repository-tll.js';
+import { FirstMentionRepository } from '../db/repository-first-mentions.js';
+import { FirstMentionService } from '../services/first-mention-service.js';
+import { llm } from '../services/llm.js';
 import type { CoreStores } from '../db/stores.js';
 import { PgMemoryStore } from '../db/pg-memory-store.js';
 import { PgEpisodeStore } from '../db/pg-episode-store.js';
@@ -202,6 +206,36 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     pool,
   };
 
+  // Phase 4 TLL — per-entity event chain for EO/MSR/TR queries.
+  // Append on memory store, traverse on retrieval.
+  const tllRepository = entities ? new TllRepository(pool) : null;
+
+  // First-mention events — chronological topic-introduction list. Caller
+  // (e.g. an external harness) drives extraction explicitly via the
+  // POST /v1/memories/first-mentions/extract route, supplying its own
+  // turn-id-to-memory-id mapping (the ingest pipeline does not retain
+  // turn structure). The chatFn adapter wraps the configured LLM
+  // singleton; per-call cost is logged inside `llm.chat`.
+  const firstMentionRepository = new FirstMentionRepository(pool);
+  const firstMentionService = new FirstMentionService(
+    firstMentionRepository,
+    async (system, user, maxTokens) => {
+      const text = await llm.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        { maxTokens },
+      );
+      // Token usage is intentionally NOT returned here: `LLMProvider.chat`
+      // emits per-call cost telemetry via `writeCostEvent` internally
+      // (see `src/services/llm.ts`). Surfacing zeros at this seam invited
+      // the bug the prior reviewer caught — readers would treat them as
+      // real counts. Drop the field instead until usage is plumbed.
+      return { text };
+    },
+  );
+
   const service = new MemoryService(
     memory,
     claims,
@@ -210,6 +244,8 @@ export function createCoreRuntime(deps: CoreRuntimeDeps): CoreRuntime {
     undefined,
     runtimeConfig,
     stores,
+    tllRepository ?? undefined,
+    firstMentionService,
   );
 
   return {

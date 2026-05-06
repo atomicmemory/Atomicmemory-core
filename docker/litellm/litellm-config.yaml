@@ -1,0 +1,131 @@
+# LiteLLM proxy configuration for AtomicMemory.
+#
+# Why this exists
+# ---------------
+# AtomicMemory's LLM lane already supports any OpenAI-compatible endpoint via
+# `LLM_PROVIDER=openai-compatible` + `LLM_API_URL` + `LLM_API_KEY`
+# (see src/services/llm.ts -> OpenAICompatibleLLM). Pointing that lane at a
+# LiteLLM proxy gives us a single, config-driven seam to swap LLM providers
+# (Anthropic, OpenAI, Microsoft Foundry / Azure, AWS Bedrock, Google Gemini)
+# without code changes in core.
+#
+# How it's used
+# -------------
+# 1. Start the proxy:        docker compose -f docker/litellm/docker-compose.litellm.yml up -d
+# 2. In core .env, set:      LLM_PROVIDER=openai-compatible
+#                            LLM_API_URL=http://localhost:4000
+#                            LLM_API_KEY=sk-litellm-master   # the master_key below
+#                            LLM_MODEL=anthropic-haiku-4-5   # any model_name from the model_list
+# 3. Restart the core dev server (do NOT bounce a running multirun's server).
+#
+# Provider credentials live in the host environment, NOT in this file. The
+# proxy resolves `os.environ/VAR_NAME` at request time, so the same config.yaml
+# works in dev (one credential set) and in CI/prod (a different set) without
+# editing it. Missing credentials surface as 401 from the *target provider*
+# only when that model is actually called — startup does not block.
+#
+# Model naming convention
+# -----------------------
+# `model_name` is the alias clients use (LLM_MODEL on the AtomicMemory side
+# OR `model` in the OpenAI request body). `litellm_params.model` is the
+# upstream provider+model identifier LiteLLM understands. We name aliases
+# `<provider>-<short-model>` so dashboard reads stay legible.
+
+model_list:
+  # ---------------------------------------------------------------------------
+  # Anthropic — direct API. Default backbone for AtomicMemory today.
+  # Requires: ANTHROPIC_API_KEY
+  # ---------------------------------------------------------------------------
+  - model_name: anthropic-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ---------------------------------------------------------------------------
+  # OpenAI — direct API.
+  # Requires: OPENAI_API_KEY
+  # ---------------------------------------------------------------------------
+  - model_name: openai-gpt-5-chat
+    litellm_params:
+      model: openai/gpt-5-chat
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai-gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ---------------------------------------------------------------------------
+  # Microsoft Foundry / Azure AI Projects.
+  # The Foundry sprint already provisioned a deployment; reuse its endpoint.
+  # Requires:
+  #   FOUNDRY_API_BASE   = same value as PROJECT_ENDPOINT (https://<resource>.services.ai.azure.com/api/projects/<project>)
+  #   FOUNDRY_API_KEY    = Azure AI Projects key. If using `az login` / Entra
+  #                        identity instead of a key, leave unset and use the
+  #                        Foundry-direct path in data/exp-cr-mini/foundry-client.ts.
+  #                        LiteLLM proxy needs a static key for `azure/`.
+  #   FOUNDRY_API_VERSION (optional, defaults to 2024-12-01-preview)
+  # ---------------------------------------------------------------------------
+  # Foundry exposes an OpenAI-compatible path at `${FOUNDRY_API_BASE}/openai/v1`
+  # (the project-endpoint Responses-and-Chat API), NOT the legacy Azure
+  # `/openai/deployments/<name>/chat/completions?api-version=X` path. So we
+  # route via LiteLLM's `openai/` provider with a custom api_base — same
+  # pattern as any OpenAI-compatible endpoint. No api-version needed.
+  - model_name: foundry-gpt-5-chat
+    litellm_params:
+      model: openai/gpt-5-chat
+      api_base: os.environ/FOUNDRY_API_BASE_OPENAI
+      api_key: os.environ/FOUNDRY_API_KEY
+
+  # ---------------------------------------------------------------------------
+  # AWS Bedrock — Claude Sonnet via Bedrock. Placeholder; no creds yet.
+  # Requires: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION_NAME
+  # ---------------------------------------------------------------------------
+  - model_name: bedrock-claude-sonnet
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
+      aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
+      aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
+      aws_region_name: os.environ/AWS_REGION_NAME
+
+  # ---------------------------------------------------------------------------
+  # Google Gemini — direct API (not Vertex). Placeholder; no creds yet.
+  # Requires: GEMINI_API_KEY (or set GOOGLE_API_KEY -- LiteLLM accepts either)
+  # ---------------------------------------------------------------------------
+  # Gemini 1.5 series isn't available on most current API keys; use 2.5 family.
+  - model_name: gemini-2-5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2-5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+litellm_settings:
+  # Drop unsupported per-provider params (e.g. seed for providers that ignore
+  # it) instead of erroring. Keeps the AtomicMemory LLM call shape stable
+  # across providers — a key reason we're using the gateway.
+  drop_params: true
+  # Per-call timeout. AtomicMemory's AUDN path can produce long prompts; 90s
+  # bounds wall-time without truncating legit slow responses.
+  request_timeout: 90
+  # Surface upstream cost telemetry on /v1/chat/completions response, so
+  # cost-telemetry.ts can keep accounting per-provider when we route through
+  # the proxy. (LiteLLM emits `x-litellm-response-cost` header + `usage` block.)
+  set_verbose: false
+
+general_settings:
+  # Proxy-level auth. Clients (atomicmemory-core, harness) must send this as
+  # the `Authorization: Bearer <master_key>`; the proxy then injects the
+  # provider-specific creds resolved from `os.environ/...` above.
+  #
+  # The default value is a developer placeholder. Override it in your
+  # docker-compose env (LITELLM_MASTER_KEY=...) for any non-loopback use.
+  master_key: os.environ/LITELLM_MASTER_KEY

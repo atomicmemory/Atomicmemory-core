@@ -56,6 +56,8 @@ import {
   ResetSourceBodySchema,
   LessonReportBodySchema,
   UserIdQuerySchema,
+  EventChainsQuerySchema,
+  FirstMentionsExtractBodySchema,
   UserIdLimitQuerySchema,
   ListQuerySchema,
   MemoryByIdQuerySchema,
@@ -142,6 +144,8 @@ export function createMemoryRouter(
   registerStatsRoute(router, service);
   registerHealthRoute(router, configRouteAdapter);
   registerConfigRoute(router, configRouteAdapter);
+  registerEventChainsRoute(router, service);
+  registerFirstMentionsExtractRoute(router, service);
   registerConsolidateRoute(router, service);
   registerDecayRoute(router, service);
   registerCapRoute(router, service);
@@ -439,6 +443,80 @@ function registerConfigRoute(router: Router, configRouteAdapter: RuntimeConfigRo
       handleRouteError(res, 'PUT /v1/memories/config', err);
     }
   });
+}
+
+/**
+ * GET /v1/memories/event-chains?user_id=X&entity_ids=uuid1,uuid2
+ *
+ * Returns per-entity chronological event chains from the Temporal Linkage
+ * List. Entities with no events are dropped from the result. Within an
+ * entity, events are ordered by position_in_chain ASC. Used by EO-shaped
+ * read paths that need content alongside chain position. Returns
+ * `{ chains: [] }` if TLL is disabled in the runtime config.
+ */
+function registerEventChainsRoute(router: Router, service: MemoryService): void {
+  router.get('/event-chains', validateQuery(EventChainsQuerySchema), async (req: Request, res: Response) => {
+    try {
+      const q = req.query as unknown as { userId: string; entityIds: string[] };
+      const chains = await service.getEventChains(q.userId, q.entityIds);
+      res.json({
+        chains: chains.map(c => ({
+          entity_id: c.entityId,
+          events: c.events.map(e => ({
+            memory_id: e.memoryId,
+            content: e.content,
+            observation_date: e.observationDate.toISOString(),
+            position_in_chain: e.positionInChain,
+            predecessor_memory_id: e.predecessorMemoryId,
+          })),
+        })),
+      });
+    } catch (err) {
+      handleRouteError(res, 'GET /v1/memories/event-chains', err);
+    }
+  });
+}
+
+/**
+ * POST /v1/memories/first-mentions/extract
+ *
+ * Extract first-mention events from a conversation transcript and persist
+ * them. Caller supplies the turn-id-to-memory-id mapping. Returns the
+ * parsed events. Best-effort: if FirstMentionService is not wired or the
+ * underlying LLM call fails, returns `{ events: [] }` without throwing.
+ */
+function registerFirstMentionsExtractRoute(router: Router, service: MemoryService): void {
+  router.post(
+    '/first-mentions/extract',
+    validateBody(FirstMentionsExtractBodySchema),
+    async (req: Request, res: Response) => {
+      try {
+        const b = req.body as unknown as {
+          userId: string;
+          conversationText: string;
+          sourceSite: string;
+          memoryIdsByTurnId: Map<number, string>;
+        };
+        const events = await service.extractFirstMentions(
+          b.userId,
+          b.conversationText,
+          b.sourceSite,
+          b.memoryIdsByTurnId,
+        );
+        res.json({
+          events: events.map(e => ({
+            topic: e.topic,
+            turn_id: e.turnId,
+            memory_id: e.memoryId,
+            anchor_date: e.anchorDate ? e.anchorDate.toISOString() : null,
+            position_in_conversation: e.positionInConversation,
+          })),
+        });
+      } catch (err) {
+        handleRouteError(res, 'POST /v1/memories/first-mentions/extract', err);
+      }
+    },
+  );
 }
 
 function registerConsolidateRoute(router: Router, service: MemoryService): void {
