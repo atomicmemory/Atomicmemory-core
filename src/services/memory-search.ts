@@ -110,16 +110,20 @@ async function executeSearchStep(
     skipReranking: retrievalOptions?.skipReranking,
     runtimeConfig: deps.config,
   });
-  const memories = await maybeExpandViaTLL(deps, userId, query, pipelineResult.filtered, effectiveLimit);
-  return { memories, activeTrace: pipelineResult.trace };
+  // TLL augmentation runs AFTER the pipeline (which already applied its own
+  // relevance/similarity filtering). Chain-membership is a different
+  // retrieval signal than semantic similarity, so the augmented rows ride
+  // around the post-pipeline relevance gate (see appendChainAugmentation
+  // callsite in performSearch). Pipeline-filtered rows stay first.
+  return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace };
 }
 
 /**
- * Phase 4b — TLL retrieval signal. For ordering/temporal/multi-session
- * queries, expand the candidate set by traversing entity event chains.
- * The unique architectural primitive: per-entity chronological event
- * sequences that no current SOTA system surfaces at retrieval time.
- * Fail-open — chain expansion errors don't block primary retrieval.
+ * TLL retrieval signal. For ordering/temporal/multi-session queries, expand
+ * the candidate set by traversing entity event chains. Returns hydrated
+ * SearchResult rows tagged with `retrieval_signal: 'tll-chain'` so the
+ * relevance gate can recognize them as non-similarity-scored augmentations.
+ * Fail-open: chain expansion errors don't block primary retrieval.
  */
 async function maybeExpandViaTLL(
   deps: MemoryServiceDeps,
@@ -129,28 +133,33 @@ async function maybeExpandViaTLL(
   effectiveLimit: number,
 ): Promise<SearchResult[]> {
   if (!deps.tllRepository || memories.length === 0 || !shouldUseTLL(query)) {
-    return memories;
+    return [];
   }
   try {
-    const initialIds = memories.slice(0, 10).map((m) => m.id);
+    const initialIds = memories.slice(0, TLL_SEED_CANDIDATE_COUNT).map((m) => m.id);
     const chainIds = await expandViaTLL(userId, initialIds, deps.tllRepository, deps.stores.pool);
     const knownIds = new Set(memories.map((m) => m.id));
     const newIds = chainIds.filter((id) => !knownIds.has(id)).slice(0, effectiveLimit);
-    if (newIds.length === 0) return memories;
+    if (newIds.length === 0) return [];
     const hydrated = await hydrateChainMemories(deps, userId, newIds);
     console.log(`[tll-retrieval] expanded ${newIds.length} chain memories for ordering query`);
-    return [...memories, ...hydrated];
+    return hydrated;
   } catch (err) {
     // Fail-open: TLL is augmentation; never block primary retrieval
     console.error('[tll-retrieval] expansion failed:', err instanceof Error ? err.message : err);
-    return memories;
+    return [];
   }
 }
 
+/** Number of top similarity-ranked results that seed TLL chain expansion. */
+const TLL_SEED_CANDIDATE_COUNT = 10;
+
 /**
  * Direct SQL hydration into SearchResult shape — bypasses store
- * abstraction since this is a deterministic chain-traversal
- * augmentation, not a similarity search.
+ * abstraction since this is a deterministic chain-traversal augmentation,
+ * not a similarity search. Rows are tagged with `retrieval_signal:
+ * 'tll-chain'` and carry `similarity: null` so the relevance gate can
+ * skip them rather than score them against semantic similarity.
  */
 async function hydrateChainMemories(
   deps: MemoryServiceDeps,
@@ -167,7 +176,8 @@ async function hydrateChainMemories(
   return hydratedRes.rows.map((r) => ({
     id: r.id,
     content: r.content,
-    similarity: 0.5, // mid-range; chain-membership is a different signal
+    similarity: null,
+    retrieval_signal: 'tll-chain',
     created_at: r.created_at,
     importance: Number(r.importance),
     namespace: r.namespace,
@@ -368,7 +378,31 @@ export async function performSearch(
   const filteredMemories = await postProcessResults(
     deps, rawMemories, activeTrace, userId, query, asOf, sourceSite, retrievalOptions,
   );
-  return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
+  const augmented = await appendTllAugmentation(deps, userId, query, filteredMemories, effectiveLimit, activeTrace);
+  return assembleResponse(deps, augmented, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
+}
+
+/**
+ * Append TLL chain-membership augmentations after the relevance gate. The
+ * augmented rows ride around the similarity threshold because chain
+ * membership is a structurally different signal — they have no
+ * meaningful similarity score against the query.
+ */
+async function appendTllAugmentation(
+  deps: MemoryServiceDeps,
+  userId: string,
+  query: string,
+  postProcessed: PostProcessedSearch,
+  effectiveLimit: number,
+  activeTrace: TraceCollector,
+): Promise<PostProcessedSearch> {
+  const augment = await maybeExpandViaTLL(deps, userId, query, postProcessed.memories, effectiveLimit);
+  if (augment.length === 0) return postProcessed;
+  activeTrace.stage('tll-augmentation', [...postProcessed.memories, ...augment], {
+    addedCount: augment.length,
+    addedIds: augment.map((m) => m.id),
+  });
+  return { ...postProcessed, memories: [...postProcessed.memories, ...augment] };
 }
 
 /**
