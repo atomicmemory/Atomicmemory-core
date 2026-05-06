@@ -535,10 +535,18 @@ export const MemoryByIdQuerySchema = z
 export type MemoryByIdQuery = z.infer<typeof MemoryByIdQuerySchema>;
 
 /**
+ * Anti-amplification cap for `GET /v1/memories/event-chains`. The endpoint
+ * fans out per entity (one chain hydration each); without an upper bound a
+ * single request can pull tens of thousands of rows.
+ */
+const MAX_ENTITY_IDS_PER_REQUEST = 100;
+
+/**
  * Query for `GET /v1/memories/event-chains`. Accepts a comma-separated list
  * of entity UUIDs and returns the per-entity ordered event chain.
  * `entity_ids` is parsed as comma-separated, trimmed, deduplicated; empty
- * tokens skipped. At least one valid UUID required.
+ * tokens skipped. At least one valid UUID required, capped at
+ * MAX_ENTITY_IDS_PER_REQUEST entries.
  */
 export const EventChainsQuerySchema = z
   .object({
@@ -556,6 +564,9 @@ export const EventChainsQuerySchema = z
   })
   .refine(q => q.entityIds.length > 0, {
     message: 'entity_ids must contain at least one non-empty value',
+  })
+  .refine(q => q.entityIds.length <= MAX_ENTITY_IDS_PER_REQUEST, {
+    message: `entity_ids must contain at most ${MAX_ENTITY_IDS_PER_REQUEST} values`,
   })
   .refine(q => q.entityIds.every(id => UUID_REGEX.test(id)), {
     message: 'entity_ids entries must be valid UUIDs',
