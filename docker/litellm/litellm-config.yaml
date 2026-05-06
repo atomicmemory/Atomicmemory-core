@@ -71,12 +71,16 @@ model_list:
   #                        LiteLLM proxy needs a static key for `azure/`.
   #   FOUNDRY_API_VERSION (optional, defaults to 2024-12-01-preview)
   # ---------------------------------------------------------------------------
+  # Foundry exposes an OpenAI-compatible path at `${FOUNDRY_API_BASE}/openai/v1`
+  # (the project-endpoint Responses-and-Chat API), NOT the legacy Azure
+  # `/openai/deployments/<name>/chat/completions?api-version=X` path. So we
+  # route via LiteLLM's `openai/` provider with a custom api_base — same
+  # pattern as any OpenAI-compatible endpoint. No api-version needed.
   - model_name: foundry-gpt-5-chat
     litellm_params:
-      model: azure/gpt-5-chat
-      api_base: os.environ/FOUNDRY_API_BASE
+      model: openai/gpt-5-chat
+      api_base: os.environ/FOUNDRY_API_BASE_OPENAI
       api_key: os.environ/FOUNDRY_API_KEY
-      api_version: os.environ/FOUNDRY_API_VERSION
 
   # ---------------------------------------------------------------------------
   # AWS Bedrock — Claude Sonnet via Bedrock. Placeholder; no creds yet.
@@ -93,9 +97,15 @@ model_list:
   # Google Gemini — direct API (not Vertex). Placeholder; no creds yet.
   # Requires: GEMINI_API_KEY (or set GOOGLE_API_KEY -- LiteLLM accepts either)
   # ---------------------------------------------------------------------------
-  - model_name: gemini-1-5-pro
+  # Gemini 1.5 series isn't available on most current API keys; use 2.5 family.
+  - model_name: gemini-2-5-pro
     litellm_params:
-      model: gemini/gemini-1.5-pro
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-2-5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
 litellm_settings:
