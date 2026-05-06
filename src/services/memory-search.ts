@@ -21,25 +21,11 @@ import { recordSearchSideEffects } from './retrieval-side-effects.js';
 import {
   applyRelevanceFilter,
   resolveRelevanceGate,
-  type RelevanceFilterDecision,
 } from './relevance-policy.js';
+import { appendTllAugmentation } from './tll-augmentation.js';
 import type { AgentScope, WorkspaceContext } from '../db/repository-types.js';
 import type { MemoryServiceDeps, RetrievalOptions, RetrievalResult } from './memory-service-types.js';
-
-interface RelevanceFilterSummary {
-  threshold: number | null;
-  source: string;
-  reason: string;
-  queryLabel: string;
-  removedIds: string[];
-  decisions: RelevanceFilterDecision[];
-}
-
-interface PostProcessedSearch {
-  memories: SearchResult[];
-  consensusResult?: ConsensusResult;
-  relevanceFilter: RelevanceFilterSummary;
-}
+import type { PostProcessedSearch, RelevanceFilterSummary } from './memory-search-types.js';
 
 interface PackagedSearchOutput {
   mode: RetrievalResult['retrievalMode'];
@@ -109,6 +95,11 @@ async function executeSearchStep(
     skipReranking: retrievalOptions?.skipReranking,
     runtimeConfig: deps.config,
   });
+  // TLL augmentation runs AFTER the pipeline (which already applied its own
+  // relevance/similarity filtering). Chain-membership is a different
+  // retrieval signal than semantic similarity, so the augmented rows ride
+  // around the post-pipeline relevance gate (see appendChainAugmentation
+  // callsite in performSearch). Pipeline-filtered rows stay first.
   return { memories: pipelineResult.filtered, activeTrace: pipelineResult.trace };
 }
 
@@ -302,7 +293,8 @@ export async function performSearch(
   const filteredMemories = await postProcessResults(
     deps, rawMemories, activeTrace, userId, query, asOf, sourceSite, retrievalOptions,
   );
-  return assembleResponse(deps, filteredMemories, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
+  const augmented = await appendTllAugmentation(deps, userId, query, filteredMemories, effectiveLimit, activeTrace);
+  return assembleResponse(deps, augmented, query, userId, activeTrace, retrievalOptions, asOf, sourceSite, lessonCheck);
 }
 
 /**

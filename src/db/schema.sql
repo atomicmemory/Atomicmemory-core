@@ -323,6 +323,88 @@ CREATE TABLE IF NOT EXISTS memory_entities (
 
 CREATE INDEX IF NOT EXISTS idx_memory_entities_entity ON memory_entities (entity_id);
 
+-- Phase 4: Temporal Linkage List (TLL).
+-- Per-entity sparse graph of event nodes with predecessor/successor edges.
+-- Karpathy-minimal: append on ingest, traverse on EO/MSR/TR queries.
+-- Targets the abilities Mem0 explicitly admits their architecture doesn't
+-- crack at 10M (temporal reasoning, event ordering, multi-session reasoning).
+-- The unique architectural primitive nobody has shipped publicly.
+CREATE TABLE IF NOT EXISTS temporal_linkage_list (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  entity_id UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  predecessor_memory_id UUID DEFAULT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  observation_date TIMESTAMPTZ NOT NULL,
+  position_in_chain INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, entity_id, memory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tll_entity_chain
+  ON temporal_linkage_list (user_id, entity_id, position_in_chain);
+CREATE INDEX IF NOT EXISTS idx_tll_memory
+  ON temporal_linkage_list (memory_id);
+
+-- Defense-in-depth: unique (chain, position) so any future code path that
+-- bypasses the advisory-lock append fails at the DB layer instead of
+-- silently producing duplicate positions. Idempotent for fresh and
+-- existing schemas.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tll_chain_position_unique
+  ON temporal_linkage_list (user_id, entity_id, position_in_chain);
+
+-- Align predecessor FK with memory FK (CASCADE) so a hard-deleted memory
+-- removes the dependent chain node instead of leaving a half-broken
+-- predecessor pointer that breaks backward chain traversal. Idempotent:
+-- re-applying the constraint overwrites any prior ON DELETE SET NULL
+-- definition. Required for existing databases since the table-level
+-- CREATE TABLE IF NOT EXISTS above does not update column constraints.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'temporal_linkage_list'
+      AND constraint_name = 'temporal_linkage_list_predecessor_memory_id_fkey'
+  ) THEN
+    ALTER TABLE temporal_linkage_list
+      DROP CONSTRAINT temporal_linkage_list_predecessor_memory_id_fkey;
+  END IF;
+  ALTER TABLE temporal_linkage_list
+    ADD CONSTRAINT temporal_linkage_list_predecessor_memory_id_fkey
+    FOREIGN KEY (predecessor_memory_id) REFERENCES memories(id)
+    ON DELETE CASCADE;
+END$$;
+
+-- =====================================================================
+-- First-mention events (chronological topic-introduction list)
+-- =====================================================================
+-- Per-user list of "the first time topic X was introduced in conversation."
+-- Distinct from facts (which are atomic claims) and memories (which are
+-- ingested chunks). The grain matches event-ordering rubrics:
+-- "in what order did the user bring up these aspects."
+--
+-- Generated post-ingest by FirstMentionService via a single LLM call that
+-- scans the full conversation and outputs a JSON array of first-mention
+-- events. Idempotent on (user_id, memory_id) so re-running doesn't duplicate.
+CREATE TABLE IF NOT EXISTS first_mention_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  turn_id INTEGER NOT NULL,
+  memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  anchor_date TIMESTAMPTZ DEFAULT NULL,
+  position_in_conversation INTEGER NOT NULL,
+  source_site TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, memory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_first_mention_user_position
+  ON first_mention_events (user_id, position_in_conversation);
+
+CREATE INDEX IF NOT EXISTS idx_first_mention_user_topic
+  ON first_mention_events USING GIN (to_tsvector('english', topic));
+
 -- Entity relations: typed, directed edges between entities with temporal validity
 CREATE TABLE IF NOT EXISTS entity_relations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

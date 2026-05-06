@@ -169,6 +169,12 @@ export interface SearchResult extends MemoryRow {
   matched_facts?: string[];
   matched_fact_ids?: string[];
   retrieval_layer?: 'memory' | 'atomic_fact';
+  /**
+   * Origin of the row in the candidate pool. Absent for similarity-ranked
+   * rows; set to `'tll-chain'` for rows hydrated by TLL chain expansion
+   * after the relevance gate (see `hydrateChainMemories`).
+   */
+  retrieval_signal?: 'tll-chain';
 }
 
 export type AtomicFactType = 'preference' | 'project' | 'knowledge' | 'person' | 'plan';
