@@ -212,6 +212,11 @@ RULES:
 - **CORRECTION/REVISION PRESERVATION**: When the conversation contains an explicit correction, revision, or supersession of a previous statement (e.g. "Correction:", "Actually,", "Changed my mind"), the extracted fact MUST preserve the corrective relationship. Include phrasing like "instead of Y", "replacing Y", "corrected from Y", or "no longer Y" so the system can detect the supersession.
   WRONG: "User wants PostgreSQL for the production backend."
   RIGHT: "User wants PostgreSQL for the production backend, replacing the earlier MongoDB choice."
+- **NEGATIVE STATEMENT PRESERVATION**: When the user makes a negative-tense factual assertion in FIRST PERSON about themselves (e.g. "I have never used X", "I haven't tried Y", "I did not configure Z", "I never integrated W"), the extracted fact MUST preserve the negation explicitly. Do NOT normalize to a positive statement, do NOT drop the fact as non-actionable, and do NOT confuse it with assistant tutorial text containing "haven't" (e.g. "if you haven't already installed..."). Negative facts establish what the user has NOT done and are critical for contradiction detection across long conversations.
+  WRONG: "User is using Flask-Login for authentication." (when user said "I have never integrated Flask-Login")
+  WRONG: dropping the fact entirely.
+  RIGHT: "User has never integrated Flask-Login for session management in the project."
+  RIGHT: "User has never written Flask routes or handled HTTP requests in this project."
 - Skip pleasantries, filler, acknowledgments, and meta-conversation.
 - Skip generic assistant chatter (acknowledgments, "sure!", "got it", "as an AI").
 - DO extract specific factual content from assistant responses: named entities, recommendations with proper nouns, schedules, data tables, creative writing with specific details. Prefix these with "Assistant mentioned:" or "Assistant recommended:".
